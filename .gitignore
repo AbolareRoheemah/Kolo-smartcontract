@@ -5,7 +5,6 @@ scripts/e2e-artifacts/*
 # Rust / Cargo
 target/
 **/*.rs.bk
-Cargo.lock
 
 # Node.js
 node_modules/
