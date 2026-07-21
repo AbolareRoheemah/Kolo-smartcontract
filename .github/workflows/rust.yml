@@ -1,5 +1,7 @@
 name: Kolo Backend CI
 
+permissions: contents: read
+
 on:
   push:
     branches: [ "main", "develop" ]
@@ -88,11 +90,8 @@ jobs:
 
       - name: Install Stellar CLI
         run: |
-          mkdir -p "$HOME/.local/bin"
-          curl -sSL https://github.com/stellar/soroban-tools/releases/download/v21.2.0/soroban-cli-21.2.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz
-          mv soroban "$HOME/.local/bin/soroban"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          soroban --version
+          cargo install stellar-cli --locked
+          stellar --version
 
       - name: Build and optimize WASM
         run: |
@@ -108,7 +107,7 @@ jobs:
         env:
           STELLAR_SOURCE_ACCOUNT: ${{ secrets.STELLAR_DEPLOYER_KEY }}
         run: |
-          soroban contract deploy \
+          stellar contract deploy \
             --wasm target/wasm32-unknown-unknown/release/kolo_savings_group.optimized.wasm \
             --source-account "$STELLAR_SOURCE_ACCOUNT" \
             --network testnet
