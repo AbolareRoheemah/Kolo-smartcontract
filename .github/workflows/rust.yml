@@ -1,6 +1,7 @@
 name: Kolo Backend CI
 
-permissions: contents: read
+permissions:
+  contents: read
 
 on:
   push:
