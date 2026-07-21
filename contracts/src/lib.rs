@@ -14,6 +14,13 @@ fn extend_instance_ttl(env: &Env) {
 }
 
 #[contracttype]
+#[derive(Clone, PartialEq, Eq)]
+pub enum GroupType {
+    Rotational,
+    GoalBased,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
@@ -26,6 +33,9 @@ pub enum DataKey {
     HasContributedThisCycle(Address),
     CycleMemberCount,
     User(Address),
+    GroupType,
+    TargetAmount,
+    LockUntilTarget,
 }
 
 #[contracttype]
@@ -47,6 +57,9 @@ impl KoloSavingsContract {
         token: Address,
         name: String,
         contribution_amount: i128,
+        group_type: GroupType,
+        target_amount: Option<i128>,
+        lock_until_target: bool,
     ) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Already initialized");
@@ -61,6 +74,13 @@ impl KoloSavingsContract {
         env.storage()
             .instance()
             .set(&DataKey::ContributionAmount, &contribution_amount);
+        env.storage().instance().set(&DataKey::GroupType, &group_type);
+        if let Some(target) = target_amount {
+            env.storage().instance().set(&DataKey::TargetAmount, &target);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::LockUntilTarget, &lock_until_target);
 
         let empty_members: Vec<Address> = Vec::new(&env);
         env.storage()
@@ -109,8 +129,14 @@ impl KoloSavingsContract {
             .instance()
             .get(&DataKey::ContributionAmount)
             .unwrap();
-        if amount != expected_amount {
+        let group_type: GroupType = env.storage().instance().get(&DataKey::GroupType).unwrap_or(GroupType::Rotational);
+
+        if group_type == GroupType::Rotational && amount != expected_amount {
             panic!("Must contribute the exact amount");
+        }
+        
+        if amount <= 0 {
+            panic!("Amount must be positive");
         }
 
         let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
@@ -119,11 +145,13 @@ impl KoloSavingsContract {
         }
 
         // Freeze the member count at the start of a cycle on the first contribution
-        if !env.storage().instance().has(&DataKey::CycleMemberCount) {
-            let count = members.len() as i128;
-            env.storage()
-                .instance()
-                .set(&DataKey::CycleMemberCount, &count);
+        if group_type == GroupType::Rotational {
+            if !env.storage().instance().has(&DataKey::CycleMemberCount) {
+                let count = members.len() as i128;
+                env.storage()
+                    .instance()
+                    .set(&DataKey::CycleMemberCount, &count);
+            }
         }
 
         let has_contributed: bool = env
@@ -173,6 +201,11 @@ impl KoloSavingsContract {
     /// Withdraw payout (Admin triggers payout to a member)
     /// Enforces strictly fixed rotational payout (Ajo/Esusu) rules.
     pub fn payout(env: Env, recipient: Address) {
+        let group_type: GroupType = env.storage().instance().get(&DataKey::GroupType).unwrap_or(GroupType::Rotational);
+        if group_type == GroupType::GoalBased {
+            panic!("Payouts not allowed in GoalBased groups");
+        }
+
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         extend_instance_ttl(&env);
@@ -225,25 +258,93 @@ impl KoloSavingsContract {
             .publish((symbol_short!("payout"), recipient), pool_size);
     }
 
+    /// Withdraw savings (GoalBased groups only)
+    pub fn withdraw_savings(env: Env, member: Address, amount: i128) {
+        member.require_auth();
+        extend_instance_ttl(&env);
+
+        let group_type: GroupType = env
+            .storage()
+            .instance()
+            .get(&DataKey::GroupType)
+            .unwrap_or(GroupType::Rotational);
+
+        if group_type == GroupType::Rotational {
+            panic!("Withdrawals not allowed in rotational groups");
+        }
+
+        if amount <= 0 {
+            panic!("Withdrawal amount must be positive");
+        }
+
+        let current_contribution: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Contributions(member.clone()))
+            .unwrap_or(0);
+
+        if current_contribution < amount {
+            panic!("Insufficient savings to withdraw");
+        }
+
+        let lock_until_target: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::LockUntilTarget)
+            .unwrap_or(false);
+
+        if lock_until_target {
+            if let Some(target_amount) = env.storage().instance().get::<_, i128>(&DataKey::TargetAmount) {
+                if current_contribution < target_amount {
+                    panic!("Target amount not reached yet");
+                }
+            }
+        }
+
+        let new_contribution = current_contribution - amount;
+        env.storage().persistent().set(
+            &DataKey::Contributions(member.clone()),
+            &new_contribution,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::Contributions(member.clone()),
+            LEDGERS_TO_LIVE / 2,
+            LEDGERS_TO_LIVE,
+        );
+
+        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&env, &token);
+
+        token_client.transfer(&env.current_contract_address(), &member, &amount);
+
+        env.events()
+            .publish((symbol_short!("withdraw"), member), amount);
+    }
+
     /// Resets the payout cycle so members can receive payouts again.
     pub fn reset_cycle(env: Env) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         extend_instance_ttl(&env);
 
+        let group_type: GroupType = env.storage().instance().get(&DataKey::GroupType).unwrap_or(GroupType::Rotational);
         let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+        
         for member in members.iter() {
-            env.storage()
-                .persistent()
-                .set(&DataKey::HasReceivedPayout(member.clone()), &false);
+            if group_type == GroupType::Rotational {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::HasReceivedPayout(member.clone()), &false);
+                env.storage().persistent().extend_ttl(
+                    &DataKey::HasReceivedPayout(member.clone()),
+                    LEDGERS_TO_LIVE / 2,
+                    LEDGERS_TO_LIVE,
+                );
+            }
+            
             env.storage()
                 .persistent()
                 .set(&DataKey::HasContributedThisCycle(member.clone()), &false);
-            env.storage().persistent().extend_ttl(
-                &DataKey::HasReceivedPayout(member.clone()),
-                LEDGERS_TO_LIVE / 2,
-                LEDGERS_TO_LIVE,
-            );
             env.storage().persistent().extend_ttl(
                 &DataKey::HasContributedThisCycle(member.clone()),
                 LEDGERS_TO_LIVE / 2,
@@ -252,7 +353,9 @@ impl KoloSavingsContract {
         }
 
         // Clear the frozen member count so it is re-established at the next cycle's first contribution
-        env.storage().instance().remove(&DataKey::CycleMemberCount);
+        if group_type == GroupType::Rotational {
+            env.storage().instance().remove(&DataKey::CycleMemberCount);
+        }
 
         env.events().publish((symbol_short!("reset"),), ());
     }

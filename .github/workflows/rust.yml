@@ -29,6 +29,11 @@ jobs:
         with:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
+      - name: Install Rust and wasm32 target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add wasm32v1-none
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -107,3 +112,5 @@ jobs:
             --wasm target/wasm32-unknown-unknown/release/kolo_savings_group.optimized.wasm \
             --source-account "$STELLAR_SOURCE_ACCOUNT" \
             --network testnet
+      - name: Build contract for wasm (release)
+        run: cargo build --target wasm32v1-none --release
