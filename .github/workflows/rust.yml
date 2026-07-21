@@ -20,7 +20,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add wasm32-unknown-unknown
+          rustup target add wasm32v1-none
 
       - name: Install system dependencies for Soroban CLI
         run: |
@@ -34,4 +34,4 @@ jobs:
         run: cargo test
 
       - name: Build contract for wasm (release)
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: cargo build --target wasm32v1-none --release

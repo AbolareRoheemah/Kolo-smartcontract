@@ -20,7 +20,15 @@ fn test_initialize() {
     let name = String::from_str(&env, "Test Group");
     let contribution_amount = 1000;
 
-    client.initialize(&admin, &token, &name, &contribution_amount);
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
 }
 
 #[test]
@@ -36,8 +44,24 @@ fn test_double_initialize() {
     let name = String::from_str(&env, "Test Group");
     let contribution_amount = 1000;
 
-    client.initialize(&admin, &token, &name, &contribution_amount);
-    client.initialize(&admin, &token, &name, &contribution_amount);
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
 }
 
 #[test]
@@ -52,7 +76,15 @@ fn test_add_member() {
     let name = String::from_str(&env, "Test Group");
     let contribution_amount = 1000;
 
-    client.initialize(&admin, &token, &name, &contribution_amount);
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
 
     env.mock_all_auths();
     let member1 = Address::generate(&env);
@@ -73,7 +105,15 @@ fn test_contribute_not_member() {
     let name = String::from_str(&env, "Test Group");
     let contribution_amount = 1000;
 
-    client.initialize(&admin, &token, &name, &contribution_amount);
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
 
     env.mock_all_auths();
     let not_member = Address::generate(&env);
@@ -94,7 +134,15 @@ fn test_contribute_twice_same_cycle_is_rejected() {
     let token_client = token::StellarAssetClient::new(&env, &token);
     let name = String::from_str(&env, "Test Group");
 
-    client.initialize(&admin, &token, &name, &1000i128);
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
 
     let member = Address::generate(&env);
     client.add_member(&member);
@@ -117,7 +165,15 @@ fn test_contribute_allowed_after_reset() {
     let token_client = token::StellarAssetClient::new(&env, &token);
     let name = String::from_str(&env, "Test Group");
 
-    client.initialize(&admin, &token, &name, &1000i128);
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
 
     let member = Address::generate(&env);
     client.add_member(&member);
@@ -143,45 +199,182 @@ fn test_events() {
     let contribution_amount = 1000;
 
     // 1. Test Initialize Event
-    client.initialize(&admin, &token, &name, &contribution_amount);
-
-    let events = env.events().all();
-    assert_eq!(events.len(), 1);
-
-    let init_event = events.get(0).unwrap();
-    assert_eq!(init_event.0, contract_id);
-    assert_eq!(
-        init_event.1,
-        vec![&env, symbol_short!("init").into_val(&env)]
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
     );
-    let init_data: (Address, Address, String, i128) = <_>::from_val(&env, &init_event.2);
+
     assert_eq!(
-        init_data,
-        (
-            admin.clone(),
-            token.clone(),
-            name.clone(),
-            contribution_amount
-        )
+        env.events().all(),
+        vec![
+            &env,
+            (
+                contract_id.clone(),
+                soroban_sdk::vec![&env, symbol_short!("init").into_val(&env)],
+                (admin.clone(), token.clone(), name.clone(), contribution_amount).into_val(&env)
+            )
+        ]
     );
 
     // 2. Test Add Member Event
     let member1 = Address::generate(&env);
     client.add_member(&member1);
 
-    let events = env.events().all();
-    assert_eq!(events.len(), 2); // 2 events now
-
-    let add_mem_event = events.get(1).unwrap();
-    assert_eq!(add_mem_event.0, contract_id);
     assert_eq!(
-        add_mem_event.1,
+        env.events().all(),
         vec![
             &env,
-            symbol_short!("add_mem").into_val(&env),
-            member1.clone().into_val(&env)
+            (
+                contract_id.clone(),
+                soroban_sdk::vec![&env, symbol_short!("add_mem").into_val(&env), member1.clone().into_val(&env)],
+                ().into_val(&env)
+            )
         ]
     );
-    let add_mem_data: () = <_>::from_val(&env, &add_mem_event.2);
-    assert_eq!(add_mem_data, ());
 }
+
+#[test]
+fn test_goalbased_flexible_contributions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+    let name = String::from_str(&env, "Goal Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::GoalBased,
+        &None,
+        &false,
+    );
+
+    let member = Address::generate(&env);
+    client.add_member(&member);
+    token_client.mint(&member, &5000);
+
+    // Can contribute varying amounts
+    client.contribute(&member, &500);
+    
+    // Wait, the test above calls contribute twice in a row, but HasContributedThisCycle is still active.
+    // So we need to call reset_cycle() or it will panic.
+    client.reset_cycle();
+    client.contribute(&member, &1500);
+
+    assert_eq!(client.get_contribution(&member), 2000);
+}
+
+#[test]
+fn test_goalbased_partial_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+    let name = String::from_str(&env, "Goal Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::GoalBased,
+        &None,
+        &false,
+    );
+
+    let member = Address::generate(&env);
+    client.add_member(&member);
+    token_client.mint(&member, &5000);
+
+    client.contribute(&member, &2000);
+
+    assert_eq!(token_client.balance(&member), 3000);
+
+    client.withdraw_savings(&member, &500);
+
+    assert_eq!(client.get_contribution(&member), 1500);
+    assert_eq!(token_client.balance(&member), 3500);
+}
+
+#[test]
+#[should_panic(expected = "Insufficient savings to withdraw")]
+fn test_goalbased_over_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+    let name = String::from_str(&env, "Goal Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::GoalBased,
+        &None,
+        &false,
+    );
+
+    let member = Address::generate(&env);
+    client.add_member(&member);
+    token_client.mint(&member, &5000);
+
+    client.contribute(&member, &1000);
+    client.withdraw_savings(&member, &1500);
+}
+
+#[test]
+#[should_panic(expected = "Target amount not reached yet")]
+fn test_goalbased_locked_until_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+    let name = String::from_str(&env, "Goal Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::GoalBased,
+        &Some(2000), // target amount
+        &true,       // lock until target
+    );
+
+    let member = Address::generate(&env);
+    client.add_member(&member);
+    token_client.mint(&member, &5000);
+
+    client.contribute(&member, &1000);
+    // Should panic because 1000 < 2000
+    client.withdraw_savings(&member, &500);
+}
+
