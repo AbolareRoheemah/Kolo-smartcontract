@@ -378,3 +378,259 @@ fn test_goalbased_locked_until_target() {
     client.withdraw_savings(&member, &500);
 }
 
+#[test]
+fn test_remove_member_no_contribution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let name = String::from_str(&env, "Test Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    client.remove_member(&member2);
+
+    env.as_contract(&contract_id, || {
+        let members: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Members)
+            .unwrap();
+        assert_eq!(members.len(), 1);
+        assert!(members.contains(&member1));
+        assert!(!members.contains(&member2));
+    });
+}
+
+#[test]
+fn test_remove_member_with_contribution_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+    let name = String::from_str(&env, "Test Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member1);
+    client.add_member(&member2);
+    token_client.mint(&member1, &5000);
+    token_client.mint(&member2, &5000);
+
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+
+    assert_eq!(token_client.balance(&member2), 4000);
+
+    client.remove_member(&member2);
+
+    assert_eq!(token_client.balance(&member2), 5000);
+
+    env.as_contract(&contract_id, || {
+        let has_contributed: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::HasContributedThisCycle(member2.clone()))
+            .unwrap_or(false);
+        assert!(!has_contributed);
+
+        let has_received: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::HasReceivedPayout(member2.clone()))
+            .unwrap_or(false);
+        assert!(!has_received);
+    });
+}
+
+#[test]
+#[should_panic(expected = "Cannot remove member after payout")]
+fn test_remove_member_after_payout_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+    let name = String::from_str(&env, "Test Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member1);
+    client.add_member(&member2);
+    token_client.mint(&member1, &5000);
+    token_client.mint(&member2, &5000);
+
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+
+    client.payout(&member1);
+
+    client.remove_member(&member1);
+}
+
+#[test]
+fn test_remove_member_adjusts_cycle_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+    let name = String::from_str(&env, "Test Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    let member3 = Address::generate(&env);
+    client.add_member(&member1);
+    client.add_member(&member2);
+    client.add_member(&member3);
+    token_client.mint(&member1, &5000);
+    token_client.mint(&member2, &5000);
+    token_client.mint(&member3, &5000);
+
+    client.contribute(&member1, &1000);
+
+    env.as_contract(&contract_id, || {
+        let count: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CycleMemberCount)
+            .unwrap();
+        assert_eq!(count, 3);
+    });
+
+    client.remove_member(&member3);
+
+    env.as_contract(&contract_id, || {
+        let count_after: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CycleMemberCount)
+            .unwrap();
+        assert_eq!(count_after, 2);
+    });
+
+    client.contribute(&member2, &1000);
+
+    client.payout(&member1);
+
+    let contract_balance = token_client.balance(&contract_id);
+    assert_eq!(contract_balance, 0);
+
+    client.reset_cycle();
+
+    env.as_contract(&contract_id, || {
+        assert!(!env
+            .storage()
+            .instance()
+            .has(&DataKey::CycleMemberCount));
+    });
+}
+
+#[test]
+fn test_remove_last_member_clears_cycle_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+    let name = String::from_str(&env, "Test Group");
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    let member = Address::generate(&env);
+    client.add_member(&member);
+    token_client.mint(&member, &5000);
+
+    client.contribute(&member, &1000);
+
+    env.as_contract(&contract_id, || {
+        let count: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CycleMemberCount)
+            .unwrap();
+        assert_eq!(count, 1);
+    });
+
+    client.remove_member(&member);
+
+    env.as_contract(&contract_id, || {
+        assert!(!env
+            .storage()
+            .instance()
+            .has(&DataKey::CycleMemberCount));
+    });
+}
+

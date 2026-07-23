@@ -119,6 +119,77 @@ impl KoloSavingsContract {
         }
     }
 
+    /// Remove a member from the group (Admin only)
+    /// Refunds current cycle contribution if applicable. Panics if member already received payout.
+    pub fn remove_member(env: Env, member_to_remove: Address) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        extend_instance_ttl(&env);
+
+        let mut members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+        if !members.contains(&member_to_remove) {
+            panic!("Not a member");
+        }
+
+        let has_received_payout: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::HasReceivedPayout(member_to_remove.clone()))
+            .unwrap_or(false);
+        if has_received_payout {
+            panic!("Cannot remove member after payout");
+        }
+
+        let has_contributed: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::HasContributedThisCycle(member_to_remove.clone()))
+            .unwrap_or(false);
+        if has_contributed {
+            let contribution_amount: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::ContributionAmount)
+                .unwrap();
+            let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let token_client = token::Client::new(&env, &token);
+            token_client.transfer(
+                &env.current_contract_address(),
+                &member_to_remove,
+                &contribution_amount,
+            );
+        }
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::HasContributedThisCycle(member_to_remove.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::HasReceivedPayout(member_to_remove.clone()));
+
+        if env.storage().instance().has(&DataKey::CycleMemberCount) {
+            let current_count: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::CycleMemberCount)
+                .unwrap();
+            if current_count <= 1 {
+                env.storage().instance().remove(&DataKey::CycleMemberCount);
+            } else {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::CycleMemberCount, &(current_count - 1));
+            }
+        }
+
+        let index = members.iter().position(|m| m == member_to_remove).unwrap() as u32;
+        members.remove(index);
+        env.storage().instance().set(&DataKey::Members, &members);
+
+        env.events()
+            .publish((symbol_short!("rm_member"), member_to_remove), ());
+    }
+
     /// Contribute to the pool
     pub fn contribute(env: Env, member: Address, amount: i128) {
         member.require_auth();
