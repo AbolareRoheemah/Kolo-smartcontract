@@ -29,7 +29,7 @@ pub enum DataKey {
     ContributionAmount,
     Members,
     Contributions(Address),
-    HasReceivedPayout(Address),
+    NextPayoutIndex,
     HasContributedThisCycle(Address),
     CycleMemberCount,
     User(Address),
@@ -106,9 +106,9 @@ impl KoloSavingsContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::Contributions(new_member.clone()), &0i128);
-            env.storage()
-                .persistent()
-                .set(&DataKey::HasReceivedPayout(new_member.clone()), &false);
+            if !env.storage().instance().has(&DataKey::NextPayoutIndex) {
+                env.storage().instance().set(&DataKey::NextPayoutIndex, &0u32);
+            }
             env.storage().persistent().set(
                 &DataKey::HasContributedThisCycle(new_member.clone()),
                 &false,
@@ -131,13 +131,15 @@ impl KoloSavingsContract {
             panic!("Not a member");
         }
 
-        let has_received_payout: bool = env
+        let members_list: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+        let remove_index = members_list.iter().position(|m| m == member_to_remove).unwrap() as u32;
+        let next_payout_index: u32 = env
             .storage()
-            .persistent()
-            .get(&DataKey::HasReceivedPayout(member_to_remove.clone()))
-            .unwrap_or(false);
-        if has_received_payout {
-            panic!("Cannot remove member after payout");
+            .instance()
+            .get(&DataKey::NextPayoutIndex)
+            .unwrap_or(0);
+        if remove_index < next_payout_index {
+            panic!("Cannot remove member after their payout turn");
         }
 
         let has_contributed: bool = env
@@ -163,9 +165,6 @@ impl KoloSavingsContract {
         env.storage()
             .persistent()
             .remove(&DataKey::HasContributedThisCycle(member_to_remove.clone()));
-        env.storage()
-            .persistent()
-            .remove(&DataKey::HasReceivedPayout(member_to_remove.clone()));
 
         if env.storage().instance().has(&DataKey::CycleMemberCount) {
             let current_count: i128 = env
@@ -402,17 +401,6 @@ impl KoloSavingsContract {
         let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
         
         for member in members.iter() {
-            if group_type == GroupType::Rotational {
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::HasReceivedPayout(member.clone()), &false);
-                env.storage().persistent().extend_ttl(
-                    &DataKey::HasReceivedPayout(member.clone()),
-                    LEDGERS_TO_LIVE / 2,
-                    LEDGERS_TO_LIVE,
-                );
-            }
-            
             env.storage()
                 .persistent()
                 .set(&DataKey::HasContributedThisCycle(member.clone()), &false);
@@ -421,6 +409,10 @@ impl KoloSavingsContract {
                 LEDGERS_TO_LIVE / 2,
                 LEDGERS_TO_LIVE,
             );
+        }
+
+        if group_type == GroupType::Rotational {
+            env.storage().instance().set(&DataKey::NextPayoutIndex, &0u32);
         }
 
         // Clear the frozen member count so it is re-established at the next cycle's first contribution
@@ -452,14 +444,15 @@ impl KoloSavingsContract {
     }
 
     pub fn has_received_payout(env: Env, member: Address) -> bool {
-        env.storage().persistent().extend_ttl(
-            &DataKey::HasReceivedPayout(member.clone()),
-            LEDGERS_TO_LIVE / 2,
-            LEDGERS_TO_LIVE,
-        );
-        env.storage()
-            .persistent()
-            .get(&DataKey::HasReceivedPayout(member))
-            .unwrap_or(false)
+        let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+        let next_payout_index: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextPayoutIndex)
+            .unwrap_or(0);
+        match members.iter().position(|m| m == member) {
+            Some(idx) => (idx as u32) < next_payout_index,
+            None => false,
+        }
     }
 }
