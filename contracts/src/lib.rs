@@ -268,9 +268,9 @@ impl KoloSavingsContract {
             .publish((symbol_short!("contrib"), member), amount);
     }
 
-    /// Withdraw payout (Admin triggers payout to a member)
-    /// Enforces strictly fixed rotational payout (Ajo/Esusu) rules.
-    pub fn payout(env: Env, recipient: Address) {
+    /// Withdraw payout (Admin triggers payout to the next member in queue)
+    /// Enforces strictly deterministic rotational payout (Ajo/Esusu) order.
+    pub fn payout(env: Env) {
         let group_type: GroupType = env.storage().instance().get(&DataKey::GroupType).unwrap_or(GroupType::Rotational);
         if group_type == GroupType::GoalBased {
             panic!("Payouts not allowed in GoalBased groups");
@@ -281,18 +281,17 @@ impl KoloSavingsContract {
         extend_instance_ttl(&env);
 
         let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
-        if !members.contains(&recipient) {
-            panic!("Recipient is not a member");
+        let next_index: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextPayoutIndex)
+            .unwrap_or(0);
+
+        if next_index >= members.len() {
+            panic!("All members have received payouts this cycle");
         }
 
-        let has_received: bool = env
-            .storage()
-            .persistent()
-            .get(&DataKey::HasReceivedPayout(recipient.clone()))
-            .unwrap_or(false);
-        if has_received {
-            panic!("Recipient has already received a payout this cycle");
-        }
+        let recipient: Address = members.get(next_index).unwrap();
 
         let contribution_amount: i128 = env
             .storage()
@@ -315,17 +314,23 @@ impl KoloSavingsContract {
         }
 
         env.storage()
-            .persistent()
-            .set(&DataKey::HasReceivedPayout(recipient.clone()), &true);
-        env.storage().persistent().extend_ttl(
-            &DataKey::HasReceivedPayout(recipient.clone()),
-            LEDGERS_TO_LIVE / 2,
-            LEDGERS_TO_LIVE,
-        );
+            .instance()
+            .set(&DataKey::NextPayoutIndex, &(next_index + 1));
         token_client.transfer(&env.current_contract_address(), &recipient, &pool_size);
 
         env.events()
             .publish((symbol_short!("payout"), recipient), pool_size);
+    }
+
+    /// Returns the address of the next member in line for a payout.
+    pub fn get_next_payout_recipient(env: Env) -> Address {
+        let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+        let next_index: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextPayoutIndex)
+            .unwrap_or(0);
+        members.get(next_index).expect("No members or cycle complete")
     }
 
     /// Withdraw savings (GoalBased groups only)
