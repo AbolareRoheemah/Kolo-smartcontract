@@ -31,12 +31,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          targets: wasm32-unknown-unknown
-      - name: Install Rust and wasm32 target
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add wasm32v1-none
+          targets: wasm32v1-none
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -56,13 +51,13 @@ jobs:
         run: cargo test --verbose
 
       - name: Build WebAssembly (release)
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: cargo build --target wasm32v1-none --release
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: kolo-savings-group-wasm
-          path: ${{ env.WORKING_DIR }}/target/wasm32-unknown-unknown/release/kolo_savings_group.wasm
+          path: ${{ env.WORKING_DIR }}/target/wasm32v1-none/release/kolo_savings_group.wasm
           retention-days: 14
 
   deploy:
@@ -82,7 +77,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -97,20 +92,18 @@ jobs:
       - name: Build and optimize WASM
         run: |
           RUSTFLAGS="-C target-cpu=mvp" cargo build \
-            --target wasm32-unknown-unknown \
+            --target wasm32v1-none \
             --release
           cargo install wasm-opt --locked
           wasm-opt \
-            target/wasm32-unknown-unknown/release/kolo_savings_group.wasm \
-            -o target/wasm32-unknown-unknown/release/kolo_savings_group.optimized.wasm
+            target/wasm32v1-none/release/kolo_savings_group.wasm \
+            -o target/wasm32v1-none/release/kolo_savings_group.optimized.wasm
 
       - name: Deploy contract to testnet
         env:
           STELLAR_SOURCE_ACCOUNT: ${{ secrets.STELLAR_DEPLOYER_KEY }}
         run: |
           stellar contract deploy \
-            --wasm target/wasm32-unknown-unknown/release/kolo_savings_group.optimized.wasm \
+            --wasm target/wasm32v1-none/release/kolo_savings_group.optimized.wasm \
             --source-account "$STELLAR_SOURCE_ACCOUNT" \
             --network testnet
-      - name: Build contract for wasm (release)
-        run: cargo build --target wasm32v1-none --release

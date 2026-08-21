@@ -4,8 +4,7 @@
 use super::*;
 use soroban_sdk::token;
 use soroban_sdk::{
-    symbol_short, testutils::Address as _, testutils::Events, vec, Address, Env, FromVal, IntoVal,
-    String,
+    symbol_short, testutils::Address as _, testutils::Events, vec, Address, Env, IntoVal, String,
 };
 
 #[test]
@@ -216,7 +215,13 @@ fn test_events() {
             (
                 contract_id.clone(),
                 soroban_sdk::vec![&env, symbol_short!("init").into_val(&env)],
-                (admin.clone(), token.clone(), name.clone(), contribution_amount).into_val(&env)
+                (
+                    admin.clone(),
+                    token.clone(),
+                    name.clone(),
+                    contribution_amount
+                )
+                    .into_val(&env)
             )
         ]
     );
@@ -231,7 +236,11 @@ fn test_events() {
             &env,
             (
                 contract_id.clone(),
-                soroban_sdk::vec![&env, symbol_short!("add_mem").into_val(&env), member1.clone().into_val(&env)],
+                soroban_sdk::vec![
+                    &env,
+                    symbol_short!("add_mem").into_val(&env),
+                    member1.clone().into_val(&env)
+                ],
                 ().into_val(&env)
             )
         ]
@@ -267,7 +276,7 @@ fn test_goalbased_flexible_contributions() {
 
     // Can contribute varying amounts
     client.contribute(&member, &500);
-    
+
     // Wait, the test above calls contribute twice in a row, but HasContributedThisCycle is still active.
     // So we need to call reset_cycle() or it will panic.
     client.reset_cycle();
@@ -408,11 +417,7 @@ fn test_remove_member_no_contribution() {
     client.remove_member(&member2);
 
     env.as_contract(&contract_id, || {
-        let members: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&DataKey::Members)
-            .unwrap();
+        let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
         assert_eq!(members.len(), 1);
         assert!(members.contains(&member1));
         assert!(!members.contains(&member2));
@@ -465,18 +470,11 @@ fn test_remove_member_with_contribution_refund() {
             .get(&DataKey::HasContributedThisCycle(member2.clone()))
             .unwrap_or(false);
         assert!(!has_contributed);
-
-        let has_received: bool = env
-            .storage()
-            .persistent()
-            .get(&DataKey::HasReceivedPayout(member2.clone()))
-            .unwrap_or(false);
-        assert!(!has_received);
     });
 }
 
 #[test]
-#[should_panic(expected = "Cannot remove member after payout")]
+#[should_panic(expected = "Cannot remove member after their payout turn")]
 fn test_remove_member_after_payout_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -509,7 +507,7 @@ fn test_remove_member_after_payout_panics() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
 
-    client.payout(&member1);
+    client.payout();
 
     client.remove_member(&member1);
 }
@@ -571,7 +569,7 @@ fn test_remove_member_adjusts_cycle_count() {
 
     client.contribute(&member2, &1000);
 
-    client.payout(&member1);
+    client.payout();
 
     let contract_balance = token_client.balance(&contract_id);
     assert_eq!(contract_balance, 0);
@@ -579,10 +577,7 @@ fn test_remove_member_adjusts_cycle_count() {
     client.reset_cycle();
 
     env.as_contract(&contract_id, || {
-        assert!(!env
-            .storage()
-            .instance()
-            .has(&DataKey::CycleMemberCount));
+        assert!(!env.storage().instance().has(&DataKey::CycleMemberCount));
     });
 }
 
@@ -627,10 +622,222 @@ fn test_remove_last_member_clears_cycle_count() {
     client.remove_member(&member);
 
     env.as_contract(&contract_id, || {
-        assert!(!env
-            .storage()
-            .instance()
-            .has(&DataKey::CycleMemberCount));
+        assert!(!env.storage().instance().has(&DataKey::CycleMemberCount));
     });
 }
 
+#[test]
+fn test_deterministic_payout_order() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    let member0 = Address::generate(&env);
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member0);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    token_client.mint(&member0, &10000);
+    token_client.mint(&member1, &10000);
+    token_client.mint(&member2, &10000);
+
+    // Payout 1 goes to member0 (index 0 in join order)
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+    assert_eq!(client.get_next_payout_recipient(), member0);
+    client.payout();
+    assert!(client.has_received_payout(&member0));
+    assert!(!client.has_received_payout(&member1));
+    assert!(!client.has_received_payout(&member2));
+    // member0 gets the full pool: 1000 * 3 = 3000
+    // balance = 10000 - 1000 (contrib) + 3000 (payout) = 12000
+    assert_eq!(token_client.balance(&member0), 12000);
+
+    // After payout, NextPayoutIndex advanced to 1 — member1 is next
+    assert_eq!(client.get_next_payout_recipient(), member1);
+
+    // Payout 2 goes to member1 (index 1) after reset + re-contribute
+    client.reset_cycle();
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+    assert_eq!(client.get_next_payout_recipient(), member1);
+    client.payout();
+    assert!(client.has_received_payout(&member1));
+    assert!(!client.has_received_payout(&member2));
+    // 10000 - 1000 (round1) - 1000 (round2) + 3000 (payout) = 11000
+    assert_eq!(token_client.balance(&member1), 11000);
+
+    // Payout 3 goes to member2 (index 2)
+    client.reset_cycle();
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+    assert_eq!(client.get_next_payout_recipient(), member2);
+    client.payout();
+    assert!(client.has_received_payout(&member2));
+    // 10000 - 1000*3 (3 rounds) + 3000 (payout) = 10000
+    assert_eq!(token_client.balance(&member2), 10000);
+}
+
+#[test]
+fn test_queue_enforced_payout_order() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    let member0 = Address::generate(&env);
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member0);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    token_client.mint(&member0, &10000);
+    token_client.mint(&member1, &10000);
+    token_client.mint(&member2, &10000);
+
+    // Payout must go to member0 (index 0), admin cannot choose
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+
+    assert_eq!(client.get_next_payout_recipient(), member0);
+    client.payout();
+    assert!(client.has_received_payout(&member0));
+    assert!(!client.has_received_payout(&member2));
+
+    // After reset, queue advances to member1 (NextPayoutIndex persists)
+    client.reset_cycle();
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+
+    assert_eq!(client.get_next_payout_recipient(), member1);
+    client.payout();
+    assert!(client.has_received_payout(&member1));
+    assert!(!client.has_received_payout(&member2));
+
+    // After another reset, finally member2
+    client.reset_cycle();
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+
+    assert_eq!(client.get_next_payout_recipient(), member2);
+    client.payout();
+    assert!(client.has_received_payout(&member2));
+}
+
+#[test]
+fn test_cycle_resets_and_starts_again() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    let member0 = Address::generate(&env);
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member0);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    token_client.mint(&member0, &10000);
+    token_client.mint(&member1, &10000);
+    token_client.mint(&member2, &10000);
+
+    // --- Full rotation: member0 → member1 → member2 ---
+    // Round 1: payout to member0
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+    assert_eq!(client.get_next_payout_recipient(), member0);
+    client.payout();
+    assert!(client.has_received_payout(&member0));
+
+    // Round 2: payout to member1
+    client.reset_cycle();
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+    assert_eq!(client.get_next_payout_recipient(), member1);
+    client.payout();
+    assert!(client.has_received_payout(&member1));
+
+    // Round 3: payout to member2
+    client.reset_cycle();
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+    assert_eq!(client.get_next_payout_recipient(), member2);
+    client.payout();
+    assert!(client.has_received_payout(&member2));
+
+    // --- Full reset: reset_rotation() resets NextPayoutIndex to 0 ---
+    client.reset_cycle();
+    client.reset_rotation();
+
+    // After full reset, all has_received_payout flags are cleared
+    assert!(!client.has_received_payout(&member0));
+    assert!(!client.has_received_payout(&member1));
+    assert!(!client.has_received_payout(&member2));
+
+    // New rotation starts with member0 again
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+    assert_eq!(client.get_next_payout_recipient(), member0);
+    client.payout();
+    assert!(client.has_received_payout(&member0));
+}
