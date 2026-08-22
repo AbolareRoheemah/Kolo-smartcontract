@@ -34,6 +34,7 @@ pub enum DataKey {
     NextPayoutIndex,
     HasContributedThisCycle(Address),
     CycleMemberCount,
+    CurrentCycleContributions,
     User(Address),
     GroupType,
     TargetAmount,
@@ -238,6 +239,9 @@ impl KoloSavingsContract {
             env.storage()
                 .instance()
                 .set(&DataKey::CycleMemberCount, &count);
+            env.storage()
+                .instance()
+                .set(&DataKey::CurrentCycleContributions, &0i128);
         }
 
         let has_contributed: bool = env
@@ -269,15 +273,15 @@ impl KoloSavingsContract {
             &(current_contribution + amount),
         );
 
-        env.storage().persistent().extend_ttl(
-            &DataKey::Contributions(member.clone()),
-            LEDGERS_TO_LIVE / 2,
-            LEDGERS_TO_LIVE,
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::HasContributedThisCycle(member.clone()),
-            LEDGERS_TO_LIVE / 2,
-            LEDGERS_TO_LIVE,
+        // Increment current cycle contributions counter
+        let cycle_contributions: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentCycleContributions)
+            .unwrap_or(0);
+        env.storage().instance().set(
+            &DataKey::CurrentCycleContributions,
+            &(cycle_contributions + 1),
         );
 
         env.events()
@@ -421,19 +425,94 @@ impl KoloSavingsContract {
             .publish((symbol_short!("withdraw"), member), amount);
     }
 
-    /// Resets the payout cycle so members can contribute and receive payouts again.
-    /// NextPayoutIndex persists across the full rotation — it only resets when
-    /// all members have received their payout and the admin triggers a new rotation.
-    pub fn reset_cycle(env: Env) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
-        extend_instance_ttl(&env);
-
+    /// Member-initiated payout trigger
+    /// Allows any member to trigger payout once the pool is fully funded.
+    /// Enforces strictly deterministic rotational payout (Ajo/Esusu) order.
+    pub fn trigger_payout(env: Env, caller: Address, recipient: Address) {
         let group_type: GroupType = env
             .storage()
             .instance()
             .get(&DataKey::GroupType)
             .unwrap_or(GroupType::Rotational);
+        if group_type == GroupType::GoalBased {
+            panic!("Payouts not allowed in GoalBased groups");
+        }
+
+        caller.require_auth();
+
+        // Verify caller is a member
+        let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+        if !members.contains(&caller) {
+            panic!("Caller is not a member");
+        }
+
+        // Verify recipient is a member
+        if !members.contains(&recipient) {
+            panic!("Recipient is not a member");
+        }
+
+        let next_index: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextPayoutIndex)
+            .unwrap_or(0);
+
+        if next_index >= members.len() {
+            panic!("All members have received payouts this cycle");
+        }
+
+        let expected_recipient: Address = members.get(next_index).unwrap();
+        if recipient != expected_recipient {
+            panic!("Recipient is not next in payout order");
+        }
+
+        // Check if pool is full (all members have contributed)
+        let cycle_member_count: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CycleMemberCount)
+            .expect("No active cycle");
+        let current_cycle_contributions: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentCycleContributions)
+            .unwrap_or(0);
+
+        if current_cycle_contributions < cycle_member_count {
+            panic!("Pool is not full");
+        }
+
+        // Execute payout
+        let contribution_amount: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContributionAmount)
+            .unwrap();
+        let pool_size = contribution_amount * cycle_member_count;
+
+        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&env, &token);
+
+        let contract_balance = token_client.balance(&env.current_contract_address());
+        if pool_size > contract_balance {
+            panic!("Insufficient funds in contract for full payout");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::NextPayoutIndex, &(next_index + 1));
+        token_client.transfer(&env.current_contract_address(), &recipient, &pool_size);
+
+        env.events()
+            .publish((symbol_short!("trg_pay"), recipient), pool_size);
+    }
+
+    /// Resets the payout cycle so members can receive payouts again.
+    pub fn reset_cycle(env: Env) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        extend_instance_ttl(&env);
+
         let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
 
         for member in members.iter() {
@@ -447,9 +526,12 @@ impl KoloSavingsContract {
             );
         }
 
-        if group_type == GroupType::Rotational {
-            env.storage().instance().remove(&DataKey::CycleMemberCount);
-        }
+        // Clear the frozen member count so it is re-established at the next cycle's first contribution
+        env.storage().instance().remove(&DataKey::CycleMemberCount);
+        // Reset the current cycle contributions counter
+        env.storage()
+            .instance()
+            .set(&DataKey::CurrentCycleContributions, &0i128);
 
         env.events().publish((symbol_short!("reset"),), ());
     }

@@ -841,3 +841,140 @@ fn test_cycle_resets_and_starts_again() {
     client.payout();
     assert!(client.has_received_payout(&member0));
 }
+
+#[test]
+fn test_trigger_payout_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let name = String::from_str(&env, "Test Group");
+    let contribution_amount = 1000;
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    // Add two members (member1 index 0, member2 index 1)
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    // Fund the token contract so members have tokens to contribute
+    let token_client = token::Client::new(&env, &token);
+    let stellar_asset = token::StellarAssetClient::new(&env, &token);
+    for member in [&member1, &member2] {
+        stellar_asset.mint(member, &5000);
+    }
+
+    // Both members contribute
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+
+    // Member 2 triggers payout to member 1 (who is next in queue at index 0)
+    let initial_balance = token_client.balance(&member1);
+    client.trigger_payout(&member2, &member1);
+    let final_balance = token_client.balance(&member1);
+
+    // Verify payout was received (2 members * 1000 = 2000)
+    assert_eq!(final_balance, initial_balance + 2000);
+}
+
+#[test]
+#[should_panic(expected = "Pool is not full")]
+fn test_trigger_payout_pool_not_full() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let name = String::from_str(&env, "Test Group");
+    let contribution_amount = 1000;
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    // Add two members
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    // Fund the token contract
+    let stellar_asset = token::StellarAssetClient::new(&env, &token);
+    for member in [&member1, &member2] {
+        stellar_asset.mint(member, &5000);
+    }
+
+    // Only member1 contributes (pool not full)
+    client.contribute(&member1, &1000);
+
+    // Attempt to trigger payout should fail
+    client.trigger_payout(&member2, &member1);
+}
+
+#[test]
+#[should_panic(expected = "Caller is not a member")]
+fn test_trigger_payout_non_member() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let name = String::from_str(&env, "Test Group");
+    let contribution_amount = 1000;
+
+    client.initialize(
+        &admin,
+        &token,
+        &name,
+        &contribution_amount,
+        &GroupType::Rotational,
+        &None,
+        &false,
+    );
+
+    // Add two members
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    // Fund the token contract
+    let stellar_asset = token::StellarAssetClient::new(&env, &token);
+    for member in [&member1, &member2] {
+        stellar_asset.mint(member, &5000);
+    }
+
+    // Both members contribute
+    client.contribute(&member1, &1000);
+    client.contribute(&member2, &1000);
+
+    // Non-member attempts to trigger payout
+    let non_member = Address::generate(&env);
+    client.trigger_payout(&non_member, &member1);
+}

@@ -229,7 +229,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 4095
       },
       {
         "entry": {
@@ -251,33 +251,6 @@
               "durability": "persistent",
               "val": {
                 "bool": true
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "HasReceivedPayout"
-                  },
-                  {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bool": false
               }
             }
           },
@@ -322,6 +295,18 @@
                       },
                       "val": {
                         "i128": "1000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CurrentCycleContributions"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "1"
                       }
                     },
                     {
@@ -378,6 +363,18 @@
                       },
                       "val": {
                         "string": "Goal Group"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "NextPayoutIndex"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 0
                       }
                     },
                     {

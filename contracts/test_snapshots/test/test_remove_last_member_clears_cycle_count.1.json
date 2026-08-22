@@ -247,7 +247,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 4095
       },
       {
         "entry": {
@@ -286,6 +286,18 @@
                       },
                       "val": {
                         "i128": "1000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CurrentCycleContributions"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "1"
                       }
                     },
                     {
@@ -338,6 +350,18 @@
                       },
                       "val": {
                         "string": "Test Group"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "NextPayoutIndex"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 0
                       }
                     },
                     {
