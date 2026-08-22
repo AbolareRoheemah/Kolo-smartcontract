@@ -16,7 +16,8 @@ fn extend_instance_ttl(env: &Env) {
         .instance()
         .get::<_, u32>(&DataKey::CycleLengthLedgers)
         .unwrap_or(518_400);
-    let member_count = members.len() as u32;
+    #[allow(clippy::unnecessary_cast)]
+    let member_count: u32 = members.len() as u32;
     let rotation_ttl = cycle_len_ledgers.saturating_mul(member_count);
     let ttl = rotation_ttl.max(518_400);
     env.storage().instance().extend_ttl(ttl / 2, ttl);
@@ -29,7 +30,8 @@ fn extend_member_ttl(env: &Env, member: &Address) {
         .instance()
         .get::<_, u32>(&DataKey::CycleLengthLedgers)
         .unwrap_or(518_400);
-    let member_count = members.len() as u32;
+    #[allow(clippy::unnecessary_cast)]
+    let member_count: u32 = members.len() as u32;
     let rotation_ttl = cycle_len_ledgers.saturating_mul(member_count);
     let ttl = rotation_ttl.max(518_400);
     env.storage()
@@ -101,7 +103,7 @@ impl KoloSavingsContract {
 
         admin.require_auth();
 
-        let cycle_len = expected_cycle_days.unwrap_or(30) as u32 * 17_280;
+        let cycle_len = expected_cycle_days.unwrap_or(30) * 17_280;
         env.storage()
             .instance()
             .set(&DataKey::CycleLengthLedgers, &cycle_len);
