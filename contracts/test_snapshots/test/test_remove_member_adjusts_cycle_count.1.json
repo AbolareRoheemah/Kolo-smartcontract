@@ -57,8 +57,7 @@
                 "void",
                 {
                   "bool": false
-                },
-                "void"
+                }
               ]
             }
           },
@@ -390,7 +389,7 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Member"
+                    "symbol": "Contributions"
                   },
                   {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
@@ -399,38 +398,13 @@
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "has_received_payout"
-                    },
-                    "val": {
-                      "bool": true
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "last_contribution_cycle_id"
-                    },
-                    "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_contributions"
-                    },
-                    "val": {
-                      "i128": "1000"
-                    }
-                  }
-                ]
+                "i128": "1000"
               }
             }
           },
           "ext": "v0"
         },
-        "live_until": 1555200
+        "live_until": 4095
       },
       {
         "entry": {
@@ -442,7 +416,7 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Member"
+                    "symbol": "Contributions"
                   },
                   {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
@@ -451,38 +425,94 @@
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "has_received_payout"
-                    },
-                    "val": {
-                      "bool": false
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "last_contribution_cycle_id"
-                    },
-                    "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_contributions"
-                    },
-                    "val": {
-                      "i128": "1000"
-                    }
-                  }
-                ]
+                "i128": "1000"
               }
             }
           },
           "ext": "v0"
         },
-        "live_until": 1036800
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "Contributions"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "i128": "0"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "HasContributedThisCycle"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "bool": false
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 518400
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "HasContributedThisCycle"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "bool": false
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 518400
       },
       {
         "entry": {
@@ -527,24 +557,12 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "CurrentCycleId"
+                            "symbol": "CurrentCycleContributions"
                           }
                         ]
                       },
                       "val": {
-                        "u32": 2
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "CycleLengthLedgers"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "u32": 518400
+                        "i128": "0"
                       }
                     },
                     {
@@ -637,7 +655,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 1036800
+        "live_until": 518400
       },
       {
         "entry": {
@@ -1202,7 +1220,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 1036800
+        "live_until": 518400
       }
     ]
   },
