@@ -10,9 +10,31 @@ mod test;
 const LEDGERS_TO_LIVE: u32 = 518_400; // ~30 days at 5s/ledger
 
 fn extend_instance_ttl(env: &Env) {
-    env.storage()
+    let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+    let cycle_len_ledgers = env
+        .storage()
         .instance()
-        .extend_ttl(LEDGERS_TO_LIVE / 2, LEDGERS_TO_LIVE);
+        .get::<_, u32>(&DataKey::CycleLengthLedgers)
+        .unwrap_or(518_400);
+    let member_count = members.len() as u32;
+    let rotation_ttl = cycle_len_ledgers.saturating_mul(member_count);
+    let ttl = rotation_ttl.max(518_400);
+    env.storage().instance().extend_ttl(ttl / 2, ttl);
+}
+
+fn extend_member_ttl(env: &Env, member: &Address) {
+    let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+    let cycle_len_ledgers = env
+        .storage()
+        .instance()
+        .get::<_, u32>(&DataKey::CycleLengthLedgers)
+        .unwrap_or(518_400);
+    let member_count = members.len() as u32;
+    let rotation_ttl = cycle_len_ledgers.saturating_mul(member_count);
+    let ttl = rotation_ttl.max(518_400);
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Member(member.clone()), ttl / 2, ttl);
 }
 
 #[contracttype]
@@ -23,6 +45,14 @@ pub enum GroupType {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemberState {
+    pub total_contributions: i128,
+    pub last_contribution_cycle_id: u32,
+    pub has_received_payout: bool,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
@@ -30,14 +60,14 @@ pub enum DataKey {
     Name,
     ContributionAmount,
     Members,
-    Contributions(Address),
+    Member(Address),
     NextPayoutIndex,
-    HasContributedThisCycle(Address),
     CycleMemberCount,
-    User(Address),
     GroupType,
     TargetAmount,
     LockUntilTarget,
+    CurrentCycleId,
+    CycleLengthLedgers,
 }
 
 #[contracttype]
@@ -63,12 +93,24 @@ impl KoloSavingsContract {
         group_type: GroupType,
         target_amount: Option<i128>,
         lock_until_target: bool,
+        expected_cycle_days: Option<u32>,
     ) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Already initialized");
         }
 
         admin.require_auth();
+
+        let cycle_len = expected_cycle_days.unwrap_or(30) as u32 * 17_280;
+        env.storage()
+            .instance()
+            .set(&DataKey::CycleLengthLedgers, &cycle_len);
+
+        let empty_members: Vec<Address> = Vec::new(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::Members, &empty_members);
+
         extend_instance_ttl(&env);
 
         env.storage().instance().set(&DataKey::Admin, &admin);
@@ -88,11 +130,9 @@ impl KoloSavingsContract {
         env.storage()
             .instance()
             .set(&DataKey::LockUntilTarget, &lock_until_target);
-
-        let empty_members: Vec<Address> = Vec::new(&env);
         env.storage()
             .instance()
-            .set(&DataKey::Members, &empty_members);
+            .set(&DataKey::CurrentCycleId, &1u32);
 
         env.events().publish(
             (symbol_short!("init"),),
@@ -110,18 +150,23 @@ impl KoloSavingsContract {
         if !members.contains(&new_member) {
             members.push_back(new_member.clone());
             env.storage().instance().set(&DataKey::Members, &members);
+
+            // Initialize MemberState for the new member under a single key
+            let state = MemberState {
+                total_contributions: 0,
+                last_contribution_cycle_id: 0,
+                has_received_payout: false,
+            };
             env.storage()
                 .persistent()
-                .set(&DataKey::Contributions(new_member.clone()), &0i128);
+                .set(&DataKey::Member(new_member.clone()), &state);
+
+            // Initialize NextPayoutIndex if not already set
             if !env.storage().instance().has(&DataKey::NextPayoutIndex) {
                 env.storage()
                     .instance()
                     .set(&DataKey::NextPayoutIndex, &0u32);
             }
-            env.storage().persistent().set(
-                &DataKey::HasContributedThisCycle(new_member.clone()),
-                &false,
-            );
 
             env.events()
                 .publish((symbol_short!("add_mem"), new_member), ());
@@ -154,12 +199,25 @@ impl KoloSavingsContract {
             panic!("Cannot remove member after their payout turn");
         }
 
-        let has_contributed: bool = env
+        // Check if member contributed this cycle via MemberState cycle ID
+        let member_state: MemberState = env
             .storage()
             .persistent()
-            .get(&DataKey::HasContributedThisCycle(member_to_remove.clone()))
-            .unwrap_or(false);
-        if has_contributed {
+            .get(&DataKey::Member(member_to_remove.clone()))
+            .unwrap_or(MemberState {
+                total_contributions: 0,
+                last_contribution_cycle_id: 0,
+                has_received_payout: false,
+            });
+        let current_cycle_id: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentCycleId)
+            .unwrap_or(1);
+        let has_contributed_this_cycle =
+            member_state.last_contribution_cycle_id == current_cycle_id;
+
+        if has_contributed_this_cycle {
             let contribution_amount: i128 = env
                 .storage()
                 .instance()
@@ -174,10 +232,12 @@ impl KoloSavingsContract {
             );
         }
 
+        // Remove the MemberState entry entirely
         env.storage()
             .persistent()
-            .remove(&DataKey::HasContributedThisCycle(member_to_remove.clone()));
+            .remove(&DataKey::Member(member_to_remove.clone()));
 
+        // Adjust CycleMemberCount if present
         if env.storage().instance().has(&DataKey::CycleMemberCount) {
             let current_count: i128 = env
                 .storage()
@@ -240,12 +300,24 @@ impl KoloSavingsContract {
                 .set(&DataKey::CycleMemberCount, &count);
         }
 
-        let has_contributed: bool = env
+        let current_cycle_id: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentCycleId)
+            .unwrap_or(1);
+
+        // Retrieve and check MemberState via cycle ID
+        let mut member_state: MemberState = env
             .storage()
             .persistent()
-            .get(&DataKey::HasContributedThisCycle(member.clone()))
-            .unwrap_or(false);
-        if has_contributed {
+            .get(&DataKey::Member(member.clone()))
+            .unwrap_or(MemberState {
+                total_contributions: 0,
+                last_contribution_cycle_id: 0,
+                has_received_payout: false,
+            });
+
+        if member_state.last_contribution_cycle_id == current_cycle_id {
             panic!("Already contributed this cycle");
         }
 
@@ -255,30 +327,17 @@ impl KoloSavingsContract {
         // Transfer tokens from the member to this contract
         token_client.transfer(&member, env.current_contract_address(), &amount);
 
+        // Update MemberState
+        member_state.total_contributions = member_state
+            .total_contributions
+            .checked_add(amount)
+            .expect("Integer overflow in contribution total");
+        member_state.last_contribution_cycle_id = current_cycle_id;
         env.storage()
             .persistent()
-            .set(&DataKey::HasContributedThisCycle(member.clone()), &true);
+            .set(&DataKey::Member(member.clone()), &member_state);
 
-        let current_contribution: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Contributions(member.clone()))
-            .unwrap_or(0);
-        env.storage().persistent().set(
-            &DataKey::Contributions(member.clone()),
-            &(current_contribution + amount),
-        );
-
-        env.storage().persistent().extend_ttl(
-            &DataKey::Contributions(member.clone()),
-            LEDGERS_TO_LIVE / 2,
-            LEDGERS_TO_LIVE,
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::HasContributedThisCycle(member.clone()),
-            LEDGERS_TO_LIVE / 2,
-            LEDGERS_TO_LIVE,
-        );
+        extend_member_ttl(&env, &member);
 
         env.events()
             .publish((symbol_short!("contrib"), member), amount);
@@ -338,6 +397,21 @@ impl KoloSavingsContract {
             .set(&DataKey::NextPayoutIndex, &(next_index + 1));
         token_client.transfer(&env.current_contract_address(), &recipient, &pool_size);
 
+        // Stamp that the recipient has received payout this cycle
+        let mut recipient_state: MemberState = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Member(recipient.clone()))
+            .unwrap_or(MemberState {
+                total_contributions: 0,
+                last_contribution_cycle_id: 0,
+                has_received_payout: false,
+            });
+        recipient_state.has_received_payout = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Member(recipient.clone()), &recipient_state);
+
         env.events()
             .publish((symbol_short!("payout"), recipient), pool_size);
     }
@@ -374,11 +448,18 @@ impl KoloSavingsContract {
             panic!("Withdrawal amount must be positive");
         }
 
-        let current_contribution: i128 = env
+        // Retrieve MemberState to check contributions
+        let mut member_state: MemberState = env
             .storage()
             .persistent()
-            .get(&DataKey::Contributions(member.clone()))
-            .unwrap_or(0);
+            .get(&DataKey::Member(member.clone()))
+            .unwrap_or(MemberState {
+                total_contributions: 0,
+                last_contribution_cycle_id: 0,
+                has_received_payout: false,
+            });
+
+        let current_contribution: i128 = member_state.total_contributions;
 
         if current_contribution < amount {
             panic!("Insufficient savings to withdraw");
@@ -403,11 +484,12 @@ impl KoloSavingsContract {
         }
 
         let new_contribution = current_contribution - amount;
+        member_state.total_contributions = new_contribution;
         env.storage()
             .persistent()
-            .set(&DataKey::Contributions(member.clone()), &new_contribution);
+            .set(&DataKey::Member(member.clone()), &member_state);
         env.storage().persistent().extend_ttl(
-            &DataKey::Contributions(member.clone()),
+            &DataKey::Member(member.clone()),
             LEDGERS_TO_LIVE / 2,
             LEDGERS_TO_LIVE,
         );
@@ -434,18 +516,17 @@ impl KoloSavingsContract {
             .instance()
             .get(&DataKey::GroupType)
             .unwrap_or(GroupType::Rotational);
-        let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
 
-        for member in members.iter() {
-            env.storage()
-                .persistent()
-                .set(&DataKey::HasContributedThisCycle(member.clone()), &false);
-            env.storage().persistent().extend_ttl(
-                &DataKey::HasContributedThisCycle(member.clone()),
-                LEDGERS_TO_LIVE / 2,
-                LEDGERS_TO_LIVE,
-            );
-        }
+        // Increment cycle ID — this automatically makes last_contribution_cycle_id
+        // comparisons evaluate to "not contributed this cycle" for the next cycle.
+        let current_cycle_id: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentCycleId)
+            .unwrap_or(1);
+        env.storage()
+            .instance()
+            .set(&DataKey::CurrentCycleId, &(current_cycle_id + 1));
 
         if group_type == GroupType::Rotational {
             env.storage().instance().remove(&DataKey::CycleMemberCount);
@@ -478,14 +559,20 @@ impl KoloSavingsContract {
 
     pub fn get_contribution(env: Env, member: Address) -> i128 {
         env.storage().persistent().extend_ttl(
-            &DataKey::Contributions(member.clone()),
+            &DataKey::Member(member.clone()),
             LEDGERS_TO_LIVE / 2,
             LEDGERS_TO_LIVE,
         );
-        env.storage()
+        let member_state: MemberState = env
+            .storage()
             .persistent()
-            .get(&DataKey::Contributions(member))
-            .unwrap_or(0)
+            .get(&DataKey::Member(member))
+            .unwrap_or(MemberState {
+                total_contributions: 0,
+                last_contribution_cycle_id: 0,
+                has_received_payout: false,
+            });
+        member_state.total_contributions
     }
 
     pub fn has_received_payout(env: Env, member: Address) -> bool {

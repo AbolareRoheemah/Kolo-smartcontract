@@ -57,7 +57,8 @@
                 "void",
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           },
@@ -270,7 +271,7 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Contributions"
+                    "symbol": "Member"
                   },
                   {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
@@ -279,61 +280,32 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "2000"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
+                "map": [
                   {
-                    "symbol": "HasContributedThisCycle"
+                    "key": {
+                      "symbol": "has_received_payout"
+                    },
+                    "val": {
+                      "bool": false
+                    }
                   },
                   {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bool": true
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "HasReceivedPayout"
+                    "key": {
+                      "symbol": "last_contribution_cycle_id"
+                    },
+                    "val": {
+                      "u32": 2
+                    }
                   },
                   {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                    "key": {
+                      "symbol": "total_contributions"
+                    },
+                    "val": {
+                      "i128": "2000"
+                    }
                   }
                 ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bool": false
               }
             }
           },
@@ -378,6 +350,30 @@
                       },
                       "val": {
                         "i128": "1000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CurrentCycleId"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 2
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CycleLengthLedgers"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 518400
                       }
                     },
                     {
@@ -446,6 +442,18 @@
                       },
                       "val": {
                         "string": "Test Group"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "NextPayoutIndex"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 0
                       }
                     },
                     {

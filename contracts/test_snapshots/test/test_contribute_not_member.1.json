@@ -57,7 +57,8 @@
                 "void",
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           },
@@ -155,6 +156,30 @@
                       },
                       "val": {
                         "i128": "1000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CurrentCycleId"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CycleLengthLedgers"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 518400
                       }
                     },
                     {

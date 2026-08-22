@@ -27,6 +27,7 @@ fn test_initialize() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 }
 
@@ -51,6 +52,7 @@ fn test_double_initialize() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
     client.initialize(
         &admin,
@@ -60,6 +62,7 @@ fn test_double_initialize() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 }
 
@@ -83,6 +86,7 @@ fn test_add_member() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     env.mock_all_auths();
@@ -112,6 +116,7 @@ fn test_contribute_not_member() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     env.mock_all_auths();
@@ -141,6 +146,7 @@ fn test_contribute_twice_same_cycle_is_rejected() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member = Address::generate(&env);
@@ -172,6 +178,7 @@ fn test_contribute_allowed_after_reset() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member = Address::generate(&env);
@@ -206,6 +213,7 @@ fn test_events() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     assert_eq!(
@@ -268,6 +276,7 @@ fn test_goalbased_flexible_contributions() {
         &GroupType::GoalBased,
         &None,
         &false,
+        &None,
     );
 
     let member = Address::generate(&env);
@@ -306,6 +315,7 @@ fn test_goalbased_partial_withdrawal() {
         &GroupType::GoalBased,
         &None,
         &false,
+        &None,
     );
 
     let member = Address::generate(&env);
@@ -344,6 +354,7 @@ fn test_goalbased_over_withdrawal() {
         &GroupType::GoalBased,
         &None,
         &false,
+        &None,
     );
 
     let member = Address::generate(&env);
@@ -376,6 +387,7 @@ fn test_goalbased_locked_until_target() {
         &GroupType::GoalBased,
         &Some(2000), // target amount
         &true,       // lock until target
+        &None,       // expected_cycle_days
     );
 
     let member = Address::generate(&env);
@@ -407,6 +419,7 @@ fn test_remove_member_no_contribution() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member1 = Address::generate(&env);
@@ -445,6 +458,7 @@ fn test_remove_member_with_contribution_refund() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member1 = Address::generate(&env);
@@ -464,12 +478,11 @@ fn test_remove_member_with_contribution_refund() {
     assert_eq!(token_client.balance(&member2), 5000);
 
     env.as_contract(&contract_id, || {
-        let has_contributed: bool = env
+        // MemberState entry removed entirely during remove_member (O(1) design)
+        assert!(!env
             .storage()
-            .persistent()
-            .get(&DataKey::HasContributedThisCycle(member2.clone()))
-            .unwrap_or(false);
-        assert!(!has_contributed);
+            .instance()
+            .has(&DataKey::Member(member2.clone())));
     });
 }
 
@@ -495,6 +508,7 @@ fn test_remove_member_after_payout_panics() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member1 = Address::generate(&env);
@@ -533,6 +547,7 @@ fn test_remove_member_adjusts_cycle_count() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member1 = Address::generate(&env);
@@ -602,6 +617,7 @@ fn test_remove_last_member_clears_cycle_count() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member = Address::generate(&env);
@@ -646,6 +662,7 @@ fn test_deterministic_payout_order() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member0 = Address::generate(&env);
@@ -719,6 +736,7 @@ fn test_queue_enforced_payout_order() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member0 = Address::generate(&env);
@@ -784,6 +802,7 @@ fn test_cycle_resets_and_starts_again() {
         &GroupType::Rotational,
         &None,
         &false,
+        &None,
     );
 
     let member0 = Address::generate(&env);
