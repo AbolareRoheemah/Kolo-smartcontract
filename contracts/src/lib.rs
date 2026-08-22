@@ -16,6 +16,7 @@ pub enum DataKey {
     Contributions(Address),
     HasReceivedPayout(Address),
     CycleMemberCount,
+    CurrentCycleContributions,
     User(Address),
 }
 
@@ -88,6 +89,7 @@ impl KoloSavingsContract {
         if !env.storage().instance().has(&DataKey::CycleMemberCount) {
             let count = members.len() as i128;
             env.storage().instance().set(&DataKey::CycleMemberCount, &count);
+            env.storage().instance().set(&DataKey::CurrentCycleContributions, &0i128);
         }
 
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
@@ -99,6 +101,10 @@ impl KoloSavingsContract {
         // Update member's contribution total
         let current_contribution: i128 = env.storage().persistent().get(&DataKey::Contributions(member.clone())).unwrap_or(0);
         env.storage().persistent().set(&DataKey::Contributions(member.clone()), &(current_contribution + amount));
+
+        // Increment current cycle contributions counter
+        let cycle_contributions: i128 = env.storage().instance().get(&DataKey::CurrentCycleContributions).unwrap_or(0);
+        env.storage().instance().set(&DataKey::CurrentCycleContributions, &(cycle_contributions + 1));
 
         env.events().publish((symbol_short!("contrib"), member), amount);
     }
@@ -139,6 +145,58 @@ impl KoloSavingsContract {
         env.events().publish((symbol_short!("payout"), recipient), pool_size);
     }
 
+    /// Member-initiated payout trigger
+    /// Allows any member to trigger payout once the pool is fully funded
+    pub fn trigger_payout(env: Env, caller: Address, recipient: Address) {
+        caller.require_auth();
+
+        // Verify caller is a member
+        let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+        if !members.contains(&caller) {
+            panic!("Caller is not a member");
+        }
+
+        // Verify recipient is a member
+        if !members.contains(&recipient) {
+            panic!("Recipient is not a member");
+        }
+
+        // Verify recipient has not already received payout this cycle
+        let has_received: bool = env.storage().persistent().get(&DataKey::HasReceivedPayout(recipient.clone())).unwrap_or(false);
+        if has_received {
+            panic!("Recipient has already received a payout this cycle");
+        }
+
+        // Check if pool is full (all members have contributed)
+        let cycle_member_count: i128 = env.storage().instance()
+            .get(&DataKey::CycleMemberCount)
+            .expect("No active cycle");
+        let current_cycle_contributions: i128 = env.storage().instance()
+            .get(&DataKey::CurrentCycleContributions)
+            .unwrap_or(0);
+        
+        if current_cycle_contributions < cycle_member_count {
+            panic!("Pool is not full");
+        }
+
+        // Execute payout
+        let contribution_amount: i128 = env.storage().instance().get(&DataKey::ContributionAmount).unwrap();
+        let pool_size = contribution_amount * cycle_member_count;
+
+        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&env, &token);
+        
+        let contract_balance = token_client.balance(&env.current_contract_address());
+        if pool_size > contract_balance {
+            panic!("Insufficient funds in contract for full payout");
+        }
+
+        env.storage().persistent().set(&DataKey::HasReceivedPayout(recipient.clone()), &true);
+        token_client.transfer(&env.current_contract_address(), &recipient, &pool_size);
+
+        env.events().publish((symbol_short!("trg_pay"), recipient), pool_size);
+    }
+
     /// Resets the payout cycle so members can receive payouts again.
     pub fn reset_cycle(env: Env) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
@@ -151,6 +209,8 @@ impl KoloSavingsContract {
 
         // Clear the frozen member count so it is re-established at the next cycle's first contribution
         env.storage().instance().remove(&DataKey::CycleMemberCount);
+        // Reset the current cycle contributions counter
+        env.storage().instance().set(&DataKey::CurrentCycleContributions, &0i128);
 
         env.events().publish((symbol_short!("reset"),), ());
     }
