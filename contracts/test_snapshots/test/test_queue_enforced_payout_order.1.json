@@ -57,7 +57,8 @@
                 "void",
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           },
@@ -720,7 +721,7 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Contributions"
+                    "symbol": "Member"
                   },
                   {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
@@ -729,13 +730,38 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "3000"
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "has_received_payout"
+                    },
+                    "val": {
+                      "bool": true
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "last_contribution_cycle_id"
+                    },
+                    "val": {
+                      "u32": 3
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_contributions"
+                    },
+                    "val": {
+                      "i128": "3000"
+                    }
+                  }
+                ]
               }
             }
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1555200
       },
       {
         "entry": {
@@ -747,7 +773,7 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Contributions"
+                    "symbol": "Member"
                   },
                   {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
@@ -756,13 +782,38 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "3000"
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "has_received_payout"
+                    },
+                    "val": {
+                      "bool": true
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "last_contribution_cycle_id"
+                    },
+                    "val": {
+                      "u32": 3
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_contributions"
+                    },
+                    "val": {
+                      "i128": "3000"
+                    }
+                  }
+                ]
               }
             }
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 1555200
       },
       {
         "entry": {
@@ -774,7 +825,7 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Contributions"
+                    "symbol": "Member"
                   },
                   {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
@@ -783,94 +834,38 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "3000"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
+                "map": [
                   {
-                    "symbol": "HasContributedThisCycle"
+                    "key": {
+                      "symbol": "has_received_payout"
+                    },
+                    "val": {
+                      "bool": true
+                    }
                   },
                   {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bool": true
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "HasContributedThisCycle"
+                    "key": {
+                      "symbol": "last_contribution_cycle_id"
+                    },
+                    "val": {
+                      "u32": 3
+                    }
                   },
                   {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                    "key": {
+                      "symbol": "total_contributions"
+                    },
+                    "val": {
+                      "i128": "3000"
+                    }
                   }
                 ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bool": true
               }
             }
           },
           "ext": "v0"
         },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "HasContributedThisCycle"
-                  },
-                  {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bool": true
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
+        "live_until": 1555200
       },
       {
         "entry": {
@@ -915,12 +910,24 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "CurrentCycleContributions"
+                            "symbol": "CurrentCycleId"
                           }
                         ]
                       },
                       "val": {
-                        "i128": "3"
+                        "u32": 3
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CycleLengthLedgers"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 518400
                       }
                     },
                     {
@@ -1028,7 +1035,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 1036800
       },
       {
         "entry": {
@@ -1773,7 +1780,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 1036800
       }
     ]
   },

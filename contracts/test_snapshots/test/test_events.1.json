@@ -37,7 +37,8 @@
                 "void",
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           },
@@ -85,7 +86,7 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Contributions"
+                    "symbol": "Member"
                   },
                   {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -94,34 +95,32 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "0"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
+                "map": [
                   {
-                    "symbol": "HasContributedThisCycle"
+                    "key": {
+                      "symbol": "has_received_payout"
+                    },
+                    "val": {
+                      "bool": false
+                    }
                   },
                   {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    "key": {
+                      "symbol": "last_contribution_cycle_id"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_contributions"
+                    },
+                    "val": {
+                      "i128": "0"
+                    }
                   }
                 ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bool": false
               }
             }
           },
@@ -166,6 +165,30 @@
                       },
                       "val": {
                         "i128": "1000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CurrentCycleId"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CycleLengthLedgers"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 518400
                       }
                     },
                     {
