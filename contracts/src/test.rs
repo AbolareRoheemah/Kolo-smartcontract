@@ -957,8 +957,12 @@ fn test_payout_pool_size_overflow_panics() {
 
     env.as_contract(&contract_id, || {
         // Force an overflow scenario
-        env.storage().instance().set(&DataKey::ContributionAmount, &i128::MAX);
-        env.storage().instance().set(&DataKey::CycleMemberCount, &2i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContributionAmount, &i128::MAX);
+        env.storage()
+            .instance()
+            .set(&DataKey::CycleMemberCount, &2i128);
     });
 
     client.payout();
