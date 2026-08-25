@@ -860,3 +860,106 @@ fn test_cycle_resets_and_starts_again() {
     client.payout();
     assert!(client.has_received_payout(&member0));
 }
+
+#[test]
+#[should_panic(expected = "Contribution amount must be positive")]
+fn test_initialize_with_negative_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test"),
+        &-1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Contribution amount must be positive")]
+fn test_initialize_with_zero_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test"),
+        &0i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Contribution amount exceeds maximum limit")]
+fn test_initialize_with_exceeding_max_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test"),
+        &1_000_000_000_000_001i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Math overflow in pool calculation")]
+fn test_payout_pool_size_overflow_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member0 = Address::generate(&env);
+    client.add_member(&member0);
+
+    env.as_contract(&contract_id, || {
+        // Force an overflow scenario
+        env.storage().instance().set(&DataKey::ContributionAmount, &i128::MAX);
+        env.storage().instance().set(&DataKey::CycleMemberCount, &2i128);
+    });
+
+    client.payout();
+}
