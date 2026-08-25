@@ -865,7 +865,7 @@ fn test_cycle_resets_and_starts_again() {
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn test_payout_wrong_recipient_auth_fails() {
     let env = Env::default();
-    
+
     let contract_id = env.register_contract(None, KoloSavingsContract);
     let client = KoloSavingsContractClient::new(&env, &contract_id);
 
@@ -891,7 +891,7 @@ fn test_payout_wrong_recipient_auth_fails() {
     let member1 = Address::generate(&env);
     client.add_member(&member0);
     client.add_member(&member1);
-    
+
     token_client.mint(&member0, &10000);
     client.contribute(&member0, &1000);
 
