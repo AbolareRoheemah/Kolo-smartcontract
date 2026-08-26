@@ -2,7 +2,7 @@
 #![allow(deprecated)]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, String, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env, IntoVal, String, Vec,
 };
 
 mod test;
@@ -153,7 +153,7 @@ impl KoloSavingsContract {
     /// Add a member to the group (Admin only)
     pub fn add_member(env: Env, new_member: Address) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+        admin.require_auth_for_args((new_member.clone(),).into_val(&env));
         extend_instance_ttl(&env);
 
         let mut members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
@@ -187,7 +187,7 @@ impl KoloSavingsContract {
     /// Refunds current cycle contribution if applicable. Panics if member already received payout.
     pub fn remove_member(env: Env, member_to_remove: Address) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+        admin.require_auth_for_args((member_to_remove.clone(),).into_val(&env));
         extend_instance_ttl(&env);
 
         let mut members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
@@ -355,7 +355,7 @@ impl KoloSavingsContract {
 
     /// Withdraw payout (Admin triggers payout to the next member in queue)
     /// Enforces strictly deterministic rotational payout (Ajo/Esusu) order.
-    pub fn payout(env: Env) {
+    pub fn payout(env: Env, expected_recipient: Address) {
         let group_type: GroupType = env
             .storage()
             .instance()
@@ -366,7 +366,7 @@ impl KoloSavingsContract {
         }
 
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+        admin.require_auth_for_args((expected_recipient.clone(),).into_val(&env));
         extend_instance_ttl(&env);
 
         let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
@@ -381,6 +381,9 @@ impl KoloSavingsContract {
         }
 
         let recipient: Address = members.get(next_index).unwrap();
+        if recipient != expected_recipient {
+            panic!("Recipient mismatch");
+        }
 
         let contribution_amount: i128 = env
             .storage()
@@ -522,7 +525,7 @@ impl KoloSavingsContract {
     /// all members have received their payout and the admin triggers a new rotation.
     pub fn reset_cycle(env: Env) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+        admin.require_auth_for_args(().into_val(&env));
         extend_instance_ttl(&env);
 
         let group_type: GroupType = env
@@ -553,7 +556,7 @@ impl KoloSavingsContract {
     /// Call this after all members have received their payout to begin a new rotation.
     pub fn reset_rotation(env: Env) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+        admin.require_auth_for_args(().into_val(&env));
         extend_instance_ttl(&env);
 
         env.storage()
