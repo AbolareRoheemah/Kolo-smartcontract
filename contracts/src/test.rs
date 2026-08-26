@@ -521,7 +521,7 @@ fn test_remove_member_after_payout_panics() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
 
-    client.payout();
+    client.payout(&member1);
 
     client.remove_member(&member1);
 }
@@ -584,7 +584,7 @@ fn test_remove_member_adjusts_cycle_count() {
 
     client.contribute(&member2, &1000);
 
-    client.payout();
+    client.payout(&member1);
 
     let contract_balance = token_client.balance(&contract_id);
     assert_eq!(contract_balance, 0);
@@ -681,7 +681,7 @@ fn test_deterministic_payout_order() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member0);
-    client.payout();
+    client.payout(&member0);
     assert!(client.has_received_payout(&member0));
     assert!(!client.has_received_payout(&member1));
     assert!(!client.has_received_payout(&member2));
@@ -698,7 +698,7 @@ fn test_deterministic_payout_order() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member1);
-    client.payout();
+    client.payout(&member1);
     assert!(client.has_received_payout(&member1));
     assert!(!client.has_received_payout(&member2));
     // 10000 - 1000 (round1) - 1000 (round2) + 3000 (payout) = 11000
@@ -710,7 +710,7 @@ fn test_deterministic_payout_order() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member2);
-    client.payout();
+    client.payout(&member2);
     assert!(client.has_received_payout(&member2));
     // 10000 - 1000*3 (3 rounds) + 3000 (payout) = 10000
     assert_eq!(token_client.balance(&member2), 10000);
@@ -756,7 +756,7 @@ fn test_queue_enforced_payout_order() {
     client.contribute(&member2, &1000);
 
     assert_eq!(client.get_next_payout_recipient(), member0);
-    client.payout();
+    client.payout(&member0);
     assert!(client.has_received_payout(&member0));
     assert!(!client.has_received_payout(&member2));
 
@@ -767,7 +767,7 @@ fn test_queue_enforced_payout_order() {
     client.contribute(&member2, &1000);
 
     assert_eq!(client.get_next_payout_recipient(), member1);
-    client.payout();
+    client.payout(&member1);
     assert!(client.has_received_payout(&member1));
     assert!(!client.has_received_payout(&member2));
 
@@ -778,7 +778,7 @@ fn test_queue_enforced_payout_order() {
     client.contribute(&member2, &1000);
 
     assert_eq!(client.get_next_payout_recipient(), member2);
-    client.payout();
+    client.payout(&member2);
     assert!(client.has_received_payout(&member2));
 }
 
@@ -822,7 +822,7 @@ fn test_cycle_resets_and_starts_again() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member0);
-    client.payout();
+    client.payout(&member0);
     assert!(client.has_received_payout(&member0));
 
     // Round 2: payout to member1
@@ -831,7 +831,7 @@ fn test_cycle_resets_and_starts_again() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member1);
-    client.payout();
+    client.payout(&member1);
     assert!(client.has_received_payout(&member1));
 
     // Round 3: payout to member2
@@ -840,7 +840,7 @@ fn test_cycle_resets_and_starts_again() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member2);
-    client.payout();
+    client.payout(&member2);
     assert!(client.has_received_payout(&member2));
 
     // --- Full reset: reset_rotation() resets NextPayoutIndex to 0 ---
@@ -857,6 +857,55 @@ fn test_cycle_resets_and_starts_again() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member0);
-    client.payout();
+    client.payout(&member0);
     assert!(client.has_received_payout(&member0));
+}
+
+#[test]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_payout_wrong_recipient_auth_fails() {
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    // Initialize with mock all auths to easily bypass initialization auth
+    env.mock_all_auths();
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member0 = Address::generate(&env);
+    let member1 = Address::generate(&env);
+    client.add_member(&member0);
+    client.add_member(&member1);
+
+    token_client.mint(&member0, &10000);
+    client.contribute(&member0, &1000);
+
+    // We only explicitly mock the auth for payout with the WRONG recipient (member1)
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "payout",
+            args: (member1.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    // Calling it with member0 should fail because auth is for member1
+    client.payout(&member0);
 }
