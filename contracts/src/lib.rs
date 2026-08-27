@@ -39,6 +39,20 @@ fn extend_member_ttl(env: &Env, member: &Address) {
         .extend_ttl(&DataKey::Member(member.clone()), ttl / 2, ttl);
 }
 
+/// Reentrancy guard: panics if a payout is currently mid-execution.
+/// Called at the top of any state-mutating entrypoint that could be reached
+/// via a reentrant callback triggered from payout()'s token transfer.
+fn assert_not_executing_payout(env: &Env) {
+    let is_executing: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::IsExecutingPayout)
+        .unwrap_or(false);
+    if is_executing {
+        panic!("Reentrancy detected");
+    }
+}
+
 #[contracttype]
 #[derive(Clone, PartialEq, Eq)]
 pub enum GroupType {
@@ -70,6 +84,8 @@ pub enum DataKey {
     LockUntilTarget,
     CurrentCycleId,
     CycleLengthLedgers,
+    /// Reentrancy guard mutex, set for the duration of payout()'s execution.
+    IsExecutingPayout,
 }
 
 #[contracttype]
@@ -135,6 +151,9 @@ impl KoloSavingsContract {
         env.storage()
             .instance()
             .set(&DataKey::CurrentCycleId, &1u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::IsExecutingPayout, &false);
 
         env.events().publish(
             (symbol_short!("init"),),
@@ -178,6 +197,8 @@ impl KoloSavingsContract {
     /// Remove a member from the group (Admin only)
     /// Refunds current cycle contribution if applicable. Panics if member already received payout.
     pub fn remove_member(env: Env, member_to_remove: Address) {
+        assert_not_executing_payout(&env);
+
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth_for_args((member_to_remove.clone(),).into_val(&env));
         extend_instance_ttl(&env);
@@ -265,6 +286,8 @@ impl KoloSavingsContract {
 
     /// Contribute to the pool
     pub fn contribute(env: Env, member: Address, amount: i128) {
+        assert_not_executing_payout(&env);
+
         member.require_auth();
         extend_instance_ttl(&env);
 
@@ -326,10 +349,7 @@ impl KoloSavingsContract {
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
 
-        // Transfer tokens from the member to this contract
-        token_client.transfer(&member, env.current_contract_address(), &amount);
-
-        // Update MemberState
+        // --- Effects (state updated before the external interaction below) ---
         member_state.total_contributions = member_state
             .total_contributions
             .checked_add(amount)
@@ -341,13 +361,27 @@ impl KoloSavingsContract {
 
         extend_member_ttl(&env, &member);
 
+        // --- Interaction ---
+        // Transfer tokens from the member to this contract
+        token_client.transfer(&member, env.current_contract_address(), &amount);
+
         env.events()
             .publish((symbol_short!("contrib"), member), amount);
     }
 
     /// Withdraw payout (Admin triggers payout to the next member in queue)
     /// Enforces strictly deterministic rotational payout (Ajo/Esusu) order.
+    ///
+    /// Follows the Checks-Effects-Interactions pattern: all validation happens
+    /// first, then all state (NextPayoutIndex, the recipient's has_received_payout
+    /// flag, and TTL extensions) is committed, and only then is the external
+    /// token transfer performed. A reentrancy guard (`IsExecutingPayout`) is
+    /// held for the duration of the call so that a malicious or upgraded token
+    /// implementation cannot re-enter `payout()` or `contribute()` mid-transfer.
     pub fn payout(env: Env, expected_recipient: Address) {
+        // --- Checks ---
+        assert_not_executing_payout(&env);
+
         let group_type: GroupType = env
             .storage()
             .instance()
@@ -397,12 +431,15 @@ impl KoloSavingsContract {
             panic!("Insufficient funds in contract for full payout");
         }
 
+        // --- Effects (all committed before the external call) ---
+        env.storage()
+            .instance()
+            .set(&DataKey::IsExecutingPayout, &true);
+
         env.storage()
             .instance()
             .set(&DataKey::NextPayoutIndex, &(next_index + 1));
-        token_client.transfer(&env.current_contract_address(), &recipient, &pool_size);
 
-        // Stamp that the recipient has received payout this cycle
         let mut recipient_state: MemberState = env
             .storage()
             .persistent()
@@ -416,6 +453,19 @@ impl KoloSavingsContract {
         env.storage()
             .persistent()
             .set(&DataKey::Member(recipient.clone()), &recipient_state);
+
+        extend_member_ttl(&env, &recipient);
+
+        // --- Interaction ---
+        token_client.transfer(&env.current_contract_address(), &recipient, &pool_size);
+
+        // Release the guard now that the external call has returned.
+        // (If the transfer above panics, the whole invocation is reverted by
+        // the host and this line is never reached — the guard is never left
+        // "stuck" true, since Soroban transactions are atomic.)
+        env.storage()
+            .instance()
+            .set(&DataKey::IsExecutingPayout, &false);
 
         env.events()
             .publish((symbol_short!("payout"), recipient), pool_size);
@@ -436,6 +486,8 @@ impl KoloSavingsContract {
 
     /// Withdraw savings (GoalBased groups only)
     pub fn withdraw_savings(env: Env, member: Address, amount: i128) {
+        assert_not_executing_payout(&env);
+
         member.require_auth();
         extend_instance_ttl(&env);
 
@@ -488,6 +540,7 @@ impl KoloSavingsContract {
             }
         }
 
+        // --- Effects ---
         let new_contribution = current_contribution - amount;
         member_state.total_contributions = new_contribution;
         env.storage()
@@ -499,9 +552,9 @@ impl KoloSavingsContract {
             LEDGERS_TO_LIVE,
         );
 
+        // --- Interaction ---
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
-
         token_client.transfer(&env.current_contract_address(), &member, &amount);
 
         env.events()
@@ -512,6 +565,8 @@ impl KoloSavingsContract {
     /// NextPayoutIndex persists across the full rotation — it only resets when
     /// all members have received their payout and the admin triggers a new rotation.
     pub fn reset_cycle(env: Env) {
+        assert_not_executing_payout(&env);
+
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth_for_args(().into_val(&env));
         extend_instance_ttl(&env);
@@ -543,6 +598,8 @@ impl KoloSavingsContract {
     /// Resets the payout queue so the rotation starts from the first member again.
     /// Call this after all members have received their payout to begin a new rotation.
     pub fn reset_rotation(env: Env) {
+        assert_not_executing_payout(&env);
+
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth_for_args(().into_val(&env));
         extend_instance_ttl(&env);
