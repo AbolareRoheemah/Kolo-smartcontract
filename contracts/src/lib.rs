@@ -39,6 +39,17 @@ fn extend_member_ttl(env: &Env, member: &Address) {
         .extend_ttl(&DataKey::Member(member.clone()), ttl / 2, ttl);
 }
 
+fn require_not_paused(env: &Env) {
+    let is_paused: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::IsPaused)
+        .unwrap_or(false);
+    if is_paused {
+        panic!("Contract is paused for emergency");
+    }
+}
+
 #[contracttype]
 #[derive(Clone, PartialEq, Eq)]
 pub enum GroupType {
@@ -52,6 +63,7 @@ pub struct MemberState {
     pub total_contributions: i128,
     pub last_contribution_cycle_id: u32,
     pub has_received_payout: bool,
+    pub current_cycle_contribution: i128,
 }
 
 #[contracttype]
@@ -70,6 +82,7 @@ pub enum DataKey {
     LockUntilTarget,
     CurrentCycleId,
     CycleLengthLedgers,
+    IsPaused,
 }
 
 #[contracttype]
@@ -144,6 +157,7 @@ impl KoloSavingsContract {
 
     /// Add a member to the group (Admin only)
     pub fn add_member(env: Env, new_member: Address) {
+        require_not_paused(&env);
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth_for_args((new_member.clone(),).into_val(&env));
         extend_instance_ttl(&env);
@@ -158,6 +172,7 @@ impl KoloSavingsContract {
                 total_contributions: 0,
                 last_contribution_cycle_id: 0,
                 has_received_payout: false,
+                current_cycle_contribution: 0,
             };
             env.storage()
                 .persistent()
@@ -178,6 +193,7 @@ impl KoloSavingsContract {
     /// Remove a member from the group (Admin only)
     /// Refunds current cycle contribution if applicable. Panics if member already received payout.
     pub fn remove_member(env: Env, member_to_remove: Address) {
+        require_not_paused(&env);
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth_for_args((member_to_remove.clone(),).into_val(&env));
         extend_instance_ttl(&env);
@@ -210,6 +226,7 @@ impl KoloSavingsContract {
                 total_contributions: 0,
                 last_contribution_cycle_id: 0,
                 has_received_payout: false,
+                current_cycle_contribution: 0,
             });
         let current_cycle_id: u32 = env
             .storage()
@@ -265,6 +282,7 @@ impl KoloSavingsContract {
 
     /// Contribute to the pool
     pub fn contribute(env: Env, member: Address, amount: i128) {
+        require_not_paused(&env);
         member.require_auth();
         extend_instance_ttl(&env);
 
@@ -317,6 +335,7 @@ impl KoloSavingsContract {
                 total_contributions: 0,
                 last_contribution_cycle_id: 0,
                 has_received_payout: false,
+                current_cycle_contribution: 0,
             });
 
         if member_state.last_contribution_cycle_id == current_cycle_id {
@@ -335,6 +354,7 @@ impl KoloSavingsContract {
             .checked_add(amount)
             .expect("Integer overflow in contribution total");
         member_state.last_contribution_cycle_id = current_cycle_id;
+        member_state.current_cycle_contribution = amount;
         env.storage()
             .persistent()
             .set(&DataKey::Member(member.clone()), &member_state);
@@ -348,6 +368,7 @@ impl KoloSavingsContract {
     /// Withdraw payout (Admin triggers payout to the next member in queue)
     /// Enforces strictly deterministic rotational payout (Ajo/Esusu) order.
     pub fn payout(env: Env, expected_recipient: Address) {
+        require_not_paused(&env);
         let group_type: GroupType = env
             .storage()
             .instance()
@@ -411,6 +432,7 @@ impl KoloSavingsContract {
                 total_contributions: 0,
                 last_contribution_cycle_id: 0,
                 has_received_payout: false,
+                current_cycle_contribution: 0,
             });
         recipient_state.has_received_payout = true;
         env.storage()
@@ -436,6 +458,7 @@ impl KoloSavingsContract {
 
     /// Withdraw savings (GoalBased groups only)
     pub fn withdraw_savings(env: Env, member: Address, amount: i128) {
+        require_not_paused(&env);
         member.require_auth();
         extend_instance_ttl(&env);
 
@@ -462,6 +485,7 @@ impl KoloSavingsContract {
                 total_contributions: 0,
                 last_contribution_cycle_id: 0,
                 has_received_payout: false,
+                current_cycle_contribution: 0,
             });
 
         let current_contribution: i128 = member_state.total_contributions;
@@ -506,6 +530,108 @@ impl KoloSavingsContract {
 
         env.events()
             .publish((symbol_short!("withdraw"), member), amount);
+    }
+
+    /// Emergency withdraw (only usable while paused). Lets a member reclaim exactly
+    /// what they contributed in the *current* cycle, and unwinds the cycle counters
+    /// so the pool math stays correct if the contract is later unpaused.
+    pub fn emergency_withdraw(env: Env, member: Address) {
+        member.require_auth();
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if !is_paused {
+            panic!("Contract is not paused");
+        }
+
+        let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
+        if !members.contains(&member) {
+            panic!("Not a member");
+        }
+
+        let current_cycle_id: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentCycleId)
+            .unwrap_or(1);
+
+        let mut member_state: MemberState = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Member(member.clone()))
+            .unwrap_or(MemberState {
+                total_contributions: 0,
+                last_contribution_cycle_id: 0,
+                has_received_payout: false,
+                current_cycle_contribution: 0,
+            });
+
+        if member_state.last_contribution_cycle_id != current_cycle_id
+            || member_state.current_cycle_contribution <= 0
+        {
+            panic!("No contribution to withdraw this cycle");
+        }
+
+        let amount = member_state.current_cycle_contribution;
+
+        // Unwind this member's contribution — can never withdraw more than they put in,
+        // because we only ever refund exactly current_cycle_contribution.
+        member_state.total_contributions = member_state
+            .total_contributions
+            .checked_sub(amount)
+            .expect("Integer underflow in contribution total");
+        member_state.current_cycle_contribution = 0;
+        member_state.last_contribution_cycle_id = 0; // clears "has contributed this cycle"
+        env.storage()
+            .persistent()
+            .set(&DataKey::Member(member.clone()), &member_state);
+
+        // Keep the frozen rotational pool size consistent: one fewer paid-in member.
+        if env.storage().instance().has(&DataKey::CycleMemberCount) {
+            let current_count: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::CycleMemberCount)
+                .unwrap();
+            if current_count <= 1 {
+                env.storage().instance().remove(&DataKey::CycleMemberCount);
+            } else {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::CycleMemberCount, &(current_count - 1));
+            }
+        }
+
+        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&env.current_contract_address(), &member, &amount);
+
+        extend_member_ttl(&env, &member);
+
+        env.events()
+            .publish((symbol_short!("emg_wd"), member), amount);
+    }
+
+    /// Pause the contract (Admin only). Blocks contribute, payout, add_member, reset_cycle.
+    pub fn pause(env: Env) {
+        require_not_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        extend_instance_ttl(&env);
+        env.storage().instance().set(&DataKey::IsPaused, &true);
+        env.events().publish((symbol_short!("pause"),), ());
+    }
+
+    /// Unpause the contract (Admin only).
+    pub fn unpause(env: Env) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        extend_instance_ttl(&env);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+        env.events().publish((symbol_short!("unpause"),), ());
     }
 
     /// Resets the payout cycle so members can contribute and receive payouts again.
@@ -576,6 +702,7 @@ impl KoloSavingsContract {
                 total_contributions: 0,
                 last_contribution_cycle_id: 0,
                 has_received_payout: false,
+                current_cycle_contribution: 0,
             });
         member_state.total_contributions
     }
