@@ -426,15 +426,15 @@ impl KoloSavingsContract {
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
 
-        let contract_balance = token_client.balance(&env.current_contract_address());
-        if pool_size > contract_balance {
-            panic!("Insufficient funds in contract for full payout");
-        }
-
         // --- Effects (all committed before the external call) ---
         env.storage()
             .instance()
             .set(&DataKey::IsExecutingPayout, &true);
+
+        let contract_balance = token_client.balance(&env.current_contract_address());
+        if pool_size > contract_balance {
+            panic!("Insufficient funds in contract for full payout");
+        }
 
         env.storage()
             .instance()

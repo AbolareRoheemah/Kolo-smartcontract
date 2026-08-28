@@ -968,8 +968,14 @@ impl MaliciousToken {
             .unwrap_or(false)
     }
 
-    /// Always reports a large balance so KoloSavingsContract's funds check passes.
-    pub fn balance(_env: Env, _id: Address) -> i128 {
+    pub fn balance(env: Env, _id: Address) -> i128 {
+        let mode: u32 = env.storage().instance().get(&MalKey::Mode).unwrap_or(0);
+        if mode == 2 {
+            let kolo: Address = env.storage().instance().get(&MalKey::Kolo).unwrap();
+            let client = KoloSavingsContractClient::new(&env, &kolo);
+            // Attempt reentrancy from inside balance(), before transfer() is ever reached.
+            client.payout(&kolo); // recipient doesn't matter — should never get this far
+        }
         i128::MAX
     }
 
@@ -1124,4 +1130,21 @@ fn test_contribute_blocked_while_payout_executing() {
     });
 
     client.contribute(&member, &1000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Context, InvalidAction)")]
+fn test_reentrant_payout_call_via_balance_is_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (kolo_id, kolo_client, _mal_token_id, mal_client) = setup_with_malicious_token(&env);
+
+    let member = Address::generate(&env);
+    kolo_client.add_member(&member);
+    mal_client.init(&kolo_id);
+
+    kolo_client.contribute(&member, &1000);
+
+    mal_client.set_mode(&2u32); // reenter via balance(), not transfer()
+    kolo_client.payout(&member);
 }
