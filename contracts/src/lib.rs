@@ -101,6 +101,14 @@ impl KoloSavingsContract {
             panic!("Already initialized");
         }
 
+        if contribution_amount <= 0 {
+            panic!("Contribution amount must be positive");
+        }
+
+        if contribution_amount > 1_000_000_000_000_000 {
+            panic!("Contribution amount exceeds maximum limit");
+        }
+
         admin.require_auth();
 
         let cycle_len = expected_cycle_days.unwrap_or(30) * 17_280;
@@ -333,7 +341,7 @@ impl KoloSavingsContract {
         member_state.total_contributions = member_state
             .total_contributions
             .checked_add(amount)
-            .expect("Integer overflow in contribution total");
+            .expect("Math overflow in contribution sum");
         member_state.last_contribution_cycle_id = current_cycle_id;
         env.storage()
             .persistent()
@@ -387,7 +395,9 @@ impl KoloSavingsContract {
             .instance()
             .get(&DataKey::CycleMemberCount)
             .expect("No active cycle");
-        let pool_size = contribution_amount * frozen_count;
+        let pool_size = contribution_amount
+            .checked_mul(frozen_count)
+            .expect("Math overflow in pool calculation");
 
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
@@ -488,7 +498,9 @@ impl KoloSavingsContract {
             }
         }
 
-        let new_contribution = current_contribution - amount;
+        let new_contribution = current_contribution
+            .checked_sub(amount)
+            .expect("Math underflow in withdrawal");
         member_state.total_contributions = new_contribution;
         env.storage()
             .persistent()
