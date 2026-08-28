@@ -4,8 +4,8 @@
 use super::*;
 use soroban_sdk::token;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, testutils::Address as _,
-    testutils::Events, vec, Address, Env, IntoVal, String, Vec,
+    contract, contractimpl, contracttype, symbol_short, testutils::Address as _, testutils::Events,
+    vec, Address, Env, IntoVal, String, Vec,
 };
 
 #[test]
@@ -999,7 +999,14 @@ impl MaliciousToken {
     }
 }
 
-fn setup_with_malicious_token(env: &Env) -> (Address, KoloSavingsContractClient, Address, MaliciousTokenClient) {
+fn setup_with_malicious_token(
+    env: &Env,
+) -> (
+    Address,
+    KoloSavingsContractClient,
+    Address,
+    MaliciousTokenClient,
+) {
     let kolo_id = env.register_contract(None, KoloSavingsContract);
     let kolo_client = KoloSavingsContractClient::new(env, &kolo_id);
 
