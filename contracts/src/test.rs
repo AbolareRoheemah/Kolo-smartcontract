@@ -924,8 +924,14 @@ fn test_pause_blocks_contribute() {
     let token_client = token::StellarAssetClient::new(&env, &token);
 
     client.initialize(
-        &admin, &token, &String::from_str(&env, "Test Group"),
-        &1000i128, &GroupType::Rotational, &None, &false, &None,
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
     );
 
     let member = Address::generate(&env);
@@ -949,8 +955,14 @@ fn test_unpause_allows_contribute() {
     let token_client = token::StellarAssetClient::new(&env, &token);
 
     client.initialize(
-        &admin, &token, &String::from_str(&env, "Test Group"),
-        &1000i128, &GroupType::Rotational, &None, &false, &None,
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
     );
 
     let member = Address::generate(&env);
@@ -977,8 +989,14 @@ fn test_non_admin_cannot_pause() {
 
     env.mock_all_auths();
     client.initialize(
-        &admin, &token, &String::from_str(&env, "Test Group"),
-        &1000i128, &GroupType::Rotational, &None, &false, &None,
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
     );
 
     // No auth mocked for pause — should fail since caller isn't the admin.
@@ -1008,8 +1026,14 @@ fn test_emergency_withdraw_full_flow() {
     let token_client = token::StellarAssetClient::new(&env, &token);
 
     client.initialize(
-        &admin, &token, &String::from_str(&env, "Test Group"),
-        &1000i128, &GroupType::Rotational, &None, &false, &None,
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
     );
 
     let member1 = Address::generate(&env);
@@ -1070,8 +1094,14 @@ fn test_emergency_withdraw_twice_panics() {
     let token_client = token::StellarAssetClient::new(&env, &token);
 
     client.initialize(
-        &admin, &token, &String::from_str(&env, "Test Group"),
-        &1000i128, &GroupType::Rotational, &None, &false, &None,
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
     );
 
     let member = Address::generate(&env);
