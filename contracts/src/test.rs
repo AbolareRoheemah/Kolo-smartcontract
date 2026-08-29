@@ -1116,9 +1116,9 @@ fn setup_with_malicious_token(
     env: &Env,
 ) -> (
     Address,
-    KoloSavingsContractClient,
+    KoloSavingsContractClient<'_>,
     Address,
-    MaliciousTokenClient,
+    MaliciousTokenClient<'_>,
 ) {
     let kolo_id = env.register_contract(None, KoloSavingsContract);
     let kolo_client = KoloSavingsContractClient::new(env, &kolo_id);
