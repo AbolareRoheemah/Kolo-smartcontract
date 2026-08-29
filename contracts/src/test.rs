@@ -1288,6 +1288,7 @@ fn test_reentrant_payout_call_via_balance_is_blocked() {
     kolo_client.payout(&member);
 }
 
+#[test]
 fn test_unpause_allows_contribute() {
     let env = Env::default();
     env.mock_all_auths();
