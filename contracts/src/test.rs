@@ -1203,6 +1203,9 @@ fn test_reentrant_payout_call_is_blocked() {
 #[test]
 #[should_panic(expected = "Reentrancy detected")]
 fn test_contribute_blocked_while_payout_executing() {
+#[test]
+#[should_panic(expected = "Contract is paused for emergency")]
+fn test_pause_blocks_contribute() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, KoloSavingsContract);
@@ -1218,6 +1221,7 @@ fn test_contribute_blocked_while_payout_executing() {
         &admin,
         &token,
         &name,
+        &String::from_str(&env, "Test Group"),
         &1000i128,
         &GroupType::Rotational,
         &None,
@@ -1236,6 +1240,7 @@ fn test_contribute_blocked_while_payout_executing() {
             .set(&DataKey::IsExecutingPayout, &true);
     });
 
+    client.pause();
     client.contribute(&member, &1000);
 }
 
@@ -1254,4 +1259,176 @@ fn test_reentrant_payout_call_via_balance_is_blocked() {
 
     mal_client.set_mode(&2u32); // reenter via balance(), not transfer()
     kolo_client.payout(&member);
+}
+
+fn test_unpause_allows_contribute() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member = Address::generate(&env);
+    client.add_member(&member);
+    token_client.mint(&member, &5000);
+
+    client.pause();
+    client.unpause();
+    client.contribute(&member, &1000);
+
+    assert_eq!(client.get_contribution(&member), 1000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_non_admin_cannot_pause() {
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    // No auth mocked for pause — should fail since caller isn't the admin.
+    let attacker = Address::generate(&env);
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &attacker,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "pause",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.pause();
+}
+
+#[test]
+fn test_emergency_withdraw_full_flow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member1);
+    client.add_member(&member2);
+    token_client.mint(&member1, &5000);
+    token_client.mint(&member2, &5000);
+
+    client.contribute(&member1, &1000); // contract: 1000, CycleMemberCount frozen at 2
+    client.contribute(&member2, &1000); // contract: 2000
+
+    // Bug discovered / admin vanishes — pause and let member1 exit.
+    client.pause();
+    client.emergency_withdraw(&member1); // contract: 1000 (refunded to member1)
+
+    assert_eq!(token_client.balance(&member1), 5000); // got their 1000 back
+    assert_eq!(client.get_contribution(&member1), 0);
+
+    env.as_contract(&contract_id, || {
+        let count: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CycleMemberCount)
+            .unwrap();
+        assert_eq!(count, 1); // decremented from 2 to 1
+    });
+
+    // Unpause: member1 re-contributes, and it's still their turn to be paid
+    // (NextPayoutIndex never moved — emergency withdraw doesn't jump the queue).
+    client.unpause();
+    client.contribute(&member1, &1000); // contract: 2000 again
+
+    assert_eq!(client.get_next_payout_recipient(), member1);
+    client.payout(&member1);
+
+    // pool_size = contribution_amount(1000) * frozen CycleMemberCount(1) = 1000
+    // member1: 4000 (after re-contribute) + 1000 (payout) = 5000
+    assert_eq!(token_client.balance(&member1), 5000);
+    assert!(client.has_received_payout(&member1));
+
+    // member2's 1000 is still safely in the pool, untouched, waiting for their turn.
+    assert_eq!(client.get_contribution(&member2), 1000);
+    assert_eq!(client.get_next_payout_recipient(), member2);
+}
+
+#[test]
+#[should_panic(expected = "No contribution to withdraw this cycle")]
+fn test_emergency_withdraw_twice_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member = Address::generate(&env);
+    client.add_member(&member);
+    token_client.mint(&member, &5000);
+
+    client.contribute(&member, &1000);
+    client.pause();
+    client.emergency_withdraw(&member);
+    // Second call should panic — no contribution left this cycle.
+    client.emergency_withdraw(&member);
 }
