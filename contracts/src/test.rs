@@ -1203,9 +1203,6 @@ fn test_reentrant_payout_call_is_blocked() {
 #[test]
 #[should_panic(expected = "Reentrancy detected")]
 fn test_contribute_blocked_while_payout_executing() {
-#[test]
-#[should_panic(expected = "Contract is paused for emergency")]
-fn test_pause_blocks_contribute() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, KoloSavingsContract);
@@ -1221,7 +1218,6 @@ fn test_pause_blocks_contribute() {
         &admin,
         &token,
         &name,
-        &String::from_str(&env, "Test Group"),
         &1000i128,
         &GroupType::Rotational,
         &None,
@@ -1239,6 +1235,37 @@ fn test_pause_blocks_contribute() {
             .instance()
             .set(&DataKey::IsExecutingPayout, &true);
     });
+
+    client.contribute(&member, &1000);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused for emergency")]
+fn test_pause_blocks_contribute() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member = Address::generate(&env);
+    client.add_member(&member);
+    token_client.mint(&member, &5000);
 
     client.pause();
     client.contribute(&member, &1000);
